@@ -56,6 +56,17 @@ interface IPTracker {
   violations: number;
 }
 
+export interface ExternalAttackData {
+  active: boolean;
+  target: string;
+  port: string;
+  totalVolleys: number;
+  totalConnections: number;
+  totalFailed: number;
+  attackerIP: string;
+  lastUpdate: number;
+}
+
 class FirewallStore {
   // ---- Target website ----
   targetUrl: string = '';
@@ -75,11 +86,15 @@ class FirewallStore {
 
   // ---- Reverse proxy (protection mode) ----
   protectionEnabled: boolean = false;
-  proxyPort: number = 8080;
+  protectionLockedOn: boolean = false; // When true, protection stays ON despite serverless restarts
+  proxyPort: number = 80;
   proxyRequests: ProxyRequest[] = [];
   private readonly MAX_PROXY_REQUESTS = 5000;
   totalProxyForwarded: number = 0;
   totalProxyBlocked: number = 0;
+
+  // ---- External attack data (from dos.cpp via API) ----
+  externalAttackData: ExternalAttackData | null = null;
 
   // ---- Blocked IPs ----
   blockedIPs: Map<string, BlockedIP> = new Map();
@@ -306,6 +321,7 @@ class FirewallStore {
       totalProxyForwarded: this.totalProxyForwarded,
       totalProxyBlocked: this.totalProxyBlocked,
       blockedIPs: this.getBlockedIPs(),
+      externalAttackData: this.externalAttackData,
       alerts: this.getAlerts(30),
       config: this.config,
       ipStats: this.getIPStats(),

@@ -28,7 +28,7 @@ export async function POST(request: NextRequest) {
         if (!targetUrl) {
           return NextResponse.json({ error: 'targetUrl is required (e.g., http://example.com)' }, { status: 400 });
         }
-        const listenPort = port || 8080;
+        const listenPort = port || 80;
         const result = startProxyServer(targetUrl, listenPort);
         return NextResponse.json({ ...result, port: listenPort, running: isProxyRunning() });
       }

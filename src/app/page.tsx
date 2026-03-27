@@ -39,6 +39,17 @@ interface HealthStats {
   currentStatus: string;
 }
 
+interface ExternalAttackData {
+  active: boolean;
+  target: string;
+  port: string;
+  totalVolleys: number;
+  totalConnections: number;
+  totalFailed: number;
+  attackerIP: string;
+  lastUpdate: number;
+}
+
 interface FullState {
   targetUrl: string;
   monitoring: boolean;
@@ -47,6 +58,7 @@ interface FullState {
   protectionEnabled: boolean;
   blockedIPs: BlockedIP[];
   alerts: AlertEntry[];
+  externalAttackData: ExternalAttackData | null;
   config: {
     rateLimit: number;
     rateLimitWindow: number;
@@ -77,38 +89,37 @@ export default function Dashboard() {
   const [config, setConfig] = useState<FullState['config'] | null>(null);
   const [loading, setLoading] = useState(false);
   const [statusMsg, setStatusMsg] = useState('');
-  // Proxy protection state
-  const [proxyRunning, setProxyRunning] = useState(false);
-  const [proxyPort, setProxyPort] = useState('8080');
-  const [proxyTarget, setProxyTarget] = useState('');
+  // Protection state
+  const [protectionEnabled, setProtectionEnabled] = useState(false);
   const [proxyForwarded, setProxyForwarded] = useState(0);
   const [proxyBlocked, setProxyBlocked] = useState(0);
+  const [attackData, setAttackData] = useState<ExternalAttackData | null>(null);
 
   // ---- Fetch full state ----
   const fetchState = useCallback(async () => {
     try {
-      const [monRes, fwRes, alertRes, proxyRes] = await Promise.all([
+      const [monRes, fwRes, alertRes, atkRes] = await Promise.all([
         fetch('/api/monitor'),
         fetch('/api/firewall'),
         fetch('/api/alerts'),
-        fetch('/api/proxy'),
+        fetch('/api/attack-data'),
       ]);
       const mon = await monRes.json();
       const fw = await fwRes.json();
       const al = await alertRes.json();
-      const proxy = await proxyRes.json();
+      const atk = await atkRes.json();
 
       if (mon.targetUrl) setTargetUrl(mon.targetUrl);
       setMonitoring(mon.monitoring);
       setProbes(mon.healthProbes || []);
       setHealthStats(mon.healthStats || { avgResponseTime: 0, availability: 100, currentStatus: 'unknown' });
       setBlockedIPs(fw.blockedIPs || []);
+      setProtectionEnabled(fw.protectionEnabled || false);
       setConfig(fw.config);
       setAlerts(al.alerts || []);
-      setProxyRunning(proxy.running || false);
-      if (proxy.port) setProxyPort(String(proxy.port));
-      setProxyForwarded(proxy.totalForwarded || 0);
-      setProxyBlocked(proxy.totalBlocked || 0);
+      setProxyForwarded(fw.totalForwarded || 0);
+      setProxyBlocked(fw.totalBlocked || 0);
+      if (atk.attackData) setAttackData(atk.attackData);
     } catch (err) {
       console.error('Fetch error:', err);
     }
@@ -128,7 +139,9 @@ export default function Dashboard() {
         setProbes(data.healthProbes || []);
         setHealthStats(data.healthStats);
         setBlockedIPs(data.blockedIPs || []);
+        setProtectionEnabled(data.protectionEnabled || false);
         setAlerts(data.alerts || []);
+        if (data.externalAttackData) setAttackData(data.externalAttackData);
         setConfig(data.config);
       } catch { /* ignore */ }
     });
@@ -238,38 +251,25 @@ export default function Dashboard() {
     setTimeout(() => setStatusMsg(''), 3000);
   };
 
-  // ---- Proxy protection actions ----
-  const startProxy = async () => {
-    if (!proxyTarget.trim()) return;
+  // ---- Protection toggle ----
+  const toggleProtection = async (enable: boolean) => {
     setLoading(true);
-    const res = await fetch('/api/proxy', {
+    const res = await fetch('/api/firewall', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ action: 'start', targetUrl: proxyTarget.trim(), port: parseInt(proxyPort) || 8080 }),
+      body: JSON.stringify({ action: 'toggleProtection', enabled: enable }),
     });
     const data = await res.json();
     if (data.success) {
-      setProxyRunning(true);
-      setStatusMsg(`🛡️ Protection active on port ${proxyPort}!`);
+      setProtectionEnabled(data.protectionEnabled);
+      setStatusMsg(data.protectionEnabled
+        ? '🛡️ Protection ENABLED — attacks will be blocked!'
+        : '⚠️ Protection DISABLED');
     } else {
       setStatusMsg(`❌ ${data.error}`);
     }
     setLoading(false);
-  };
-
-  const stopProxy = async () => {
-    const res = await fetch('/api/proxy', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ action: 'stop' }),
-    });
-    const data = await res.json();
-    if (data.success) {
-      setProxyRunning(false);
-      setStatusMsg('⚠️ Protection disabled.');
-    } else {
-      setStatusMsg(`❌ ${data.error}`);
-    }
+    setTimeout(() => setStatusMsg(''), 4000);
   };
 
   // ---- Chart data ----
@@ -365,7 +365,7 @@ export default function Dashboard() {
             }}
           >
             {tab.icon} {tab.label}
-            {tab.key === 'protect' && proxyRunning && (
+            {tab.key === 'protect' && protectionEnabled && (
               <span style={{ marginLeft: 6, width: 8, height: 8, borderRadius: '50%', background: '#10b981', display: 'inline-block', animation: 'pulse-green 2s infinite' }} />
             )}
           </button>
@@ -477,100 +477,110 @@ export default function Dashboard() {
       {/* ======== PROTECT TAB ======== */}
       {activeTab === 'protect' && (
         <div className="fade-in">
+          {/* Protection Toggle */}
+          <div className="glass-card" style={{ padding: 28, marginBottom: 20, borderLeft: `4px solid ${protectionEnabled ? '#10b981' : '#ef4444'}` }}>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 16 }}>
+              <div>
+                <h3 style={{ fontSize: 20, fontWeight: 800, marginBottom: 6 }}>🛡️ ShieldWall Firewall</h3>
+                <p style={{ fontSize: 13, color: 'var(--text-secondary)' }}>
+                  {protectionEnabled
+                    ? 'Firewall is ACTIVE — dos.cpp attack tool will detect this and auto-stop attacks.'
+                    : 'Firewall is OFF — the target website is unprotected from attacks.'}
+                </p>
+              </div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                  <div style={{
+                    width: 14, height: 14, borderRadius: '50%',
+                    background: protectionEnabled ? '#10b981' : '#ef4444',
+                    boxShadow: `0 0 12px ${protectionEnabled ? '#10b981' : '#ef4444'}`,
+                    animation: protectionEnabled ? 'pulse-green 2s infinite' : 'none',
+                  }} />
+                  <span style={{
+                    fontWeight: 700, fontSize: 15,
+                    color: protectionEnabled ? '#10b981' : '#ef4444',
+                  }}>
+                    {protectionEnabled ? 'PROTECTED' : 'UNPROTECTED'}
+                  </span>
+                </div>
+                <button
+                  className={protectionEnabled ? 'btn-danger' : 'btn-primary'}
+                  onClick={() => toggleProtection(!protectionEnabled)}
+                  disabled={loading}
+                  style={{ fontSize: 14, padding: '12px 32px', minWidth: 180 }}
+                >
+                  {loading ? '⏳ ...' : protectionEnabled ? '⏹ Disable Protection' : '🛡️ Enable Protection'}
+                </button>
+              </div>
+            </div>
+          </div>
+
           {/* How it works */}
           <div className="glass-card" style={{ padding: 24, marginBottom: 20, borderLeft: '4px solid #00d4ff' }}>
-            <h3 style={{ fontSize: 16, fontWeight: 700, marginBottom: 10 }}>🛡️ How Protection Works</h3>
+            <h3 style={{ fontSize: 16, fontWeight: 700, marginBottom: 10 }}>💡 How It Works</h3>
             <p style={{ fontSize: 13, color: 'var(--text-secondary)', lineHeight: 1.7 }}>
-              ShieldWall starts a <strong style={{ color: '#00d4ff' }}>reverse proxy server</strong> on your machine.
-              Instead of traffic going directly to the target website, it flows through ShieldWall first.
-              Every request is checked against <strong style={{ color: '#f59e0b' }}>rate limits</strong> and the{' '}
-              <strong style={{ color: '#ef4444' }}>blocked IP list</strong>. Malicious requests get dropped with 403/429 responses.
-              Only clean traffic is forwarded to the real website.
+              When protection is <strong style={{ color: '#10b981' }}>ON</strong>, the <code style={{ color: '#00d4ff', background: 'rgba(0,212,255,0.1)', padding: '2px 6px', borderRadius: 4 }}>dos.cpp</code> attack tool
+              checks this dashboard&apos;s API before attacking. If ShieldWall reports <code style={{ color: '#10b981', background: 'rgba(16,185,129,0.1)', padding: '2px 6px', borderRadius: 4 }}>protectionEnabled: true</code>,
+              the attack is <strong style={{ color: '#ef4444' }}>automatically blocked</strong>.
+              A background monitor re-checks every 3 seconds — if you enable protection mid-attack, the attack auto-stops.
             </p>
             <div style={{ marginTop: 12, padding: '10px 16px', background: 'rgba(0,212,255,0.06)', borderRadius: 8, fontSize: 12, color: 'var(--text-secondary)' }}>
-              <strong>Flow:</strong> Attacker → <span style={{ color: '#00d4ff' }}>ShieldWall (port {proxyPort})</span> → Rate Limit Check → IP Block Check → <span style={{ color: '#10b981' }}>Target Website</span>
-            </div>
-            <div style={{ marginTop: 14, padding: '12px 16px', background: 'rgba(239,68,68,0.06)', borderRadius: 8, fontSize: 12, color: '#f59e0b', border: '1px solid rgba(239,68,68,0.15)' }}>
-              <strong>⚠️ Important:</strong> ShieldWall can only protect websites whose traffic flows through it. You must control the server or DNS to route traffic through ShieldWall. You <strong>cannot</strong> stop an attack on someone else&apos;s website from your laptop.
+              <strong>Flow:</strong> Attacker (Cloud Console) → <span style={{ color: '#ef4444' }}>dos.cpp checks ShieldWall API</span> → {protectionEnabled ? <span style={{ color: '#10b981' }}>⛔ ATTACK BLOCKED</span> : <span style={{ color: '#ef4444' }}>✅ Attack proceeds (no protection)</span>}
             </div>
           </div>
 
-          {/* Deployment Guide */}
-          <div className="glass-card" style={{ padding: 24, marginBottom: 20, borderLeft: '4px solid #10b981' }}>
-            <h3 style={{ fontSize: 16, fontWeight: 700, marginBottom: 10 }}>🚀 How to Deploy</h3>
-            <div style={{ fontSize: 13, color: 'var(--text-secondary)', lineHeight: 1.8 }}>
-              <p><strong style={{ color: '#10b981' }}>To protect a live website, deploy ShieldWall on the same server (or in the same network):</strong></p>
-              <ol style={{ paddingLeft: 20, marginTop: 8 }}>
-                <li>Install ShieldWall on the <strong>web server</strong> that hosts the website</li>
-                <li>Set the <strong>Target Website URL</strong> below to the website&apos;s internal address (e.g. <code style={{ color: '#10b981', background: 'rgba(16,185,129,0.1)', padding: '2px 6px', borderRadius: 4 }}>http://localhost:80</code>)</li>
-                <li>Set the <strong>Proxy Listen Port</strong> (e.g. 8080)</li>
-                <li>Update your <strong>DNS / reverse proxy / load balancer</strong> to point to ShieldWall&apos;s port instead of the original</li>
-                <li>All incoming traffic now flows through ShieldWall — malicious IPs get <span style={{ color: '#ef4444' }}>blocked</span>, clean traffic gets <span style={{ color: '#10b981' }}>forwarded</span></li>
-              </ol>
-              <p style={{ marginTop: 10 }}>This is exactly how <strong>Cloudflare, AWS Shield</strong>, and other DDoS protection services work.</p>
-            </div>
-          </div>
-          {/* Proxy controls */}
+          {/* Live Attack Data from dos.cpp */}
           <div className="glass-card" style={{ padding: 24, marginBottom: 20 }}>
-            <h3 style={{ fontSize: 16, fontWeight: 700, marginBottom: 14 }}>🚀 Start Protection</h3>
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: 12, marginBottom: 16 }}>
-              <div>
-                <label style={{ fontSize: 12, color: 'var(--text-secondary)', display: 'block', marginBottom: 4 }}>Target Website URL</label>
-                <input className="input-field" value={proxyTarget} onChange={e => setProxyTarget(e.target.value)}
-                  placeholder="e.g. http://localhost:4000 or http://example.com" disabled={proxyRunning} />
-              </div>
-              <div>
-                <label style={{ fontSize: 12, color: 'var(--text-secondary)', display: 'block', marginBottom: 4 }}>Proxy Listen Port</label>
-                <input className="input-field" value={proxyPort} onChange={e => setProxyPort(e.target.value)}
-                  placeholder="8080" disabled={proxyRunning} />
-              </div>
-            </div>
-            <div style={{ display: 'flex', gap: 12, alignItems: 'center' }}>
-              {!proxyRunning ? (
-                <button className="btn-primary" onClick={startProxy} disabled={loading || !proxyTarget.trim()}
-                  style={{ fontSize: 14, padding: '12px 32px' }}>
-                  🛡️ Enable Protection
-                </button>
-              ) : (
-                <button className="btn-danger" onClick={stopProxy} style={{ fontSize: 14, padding: '12px 32px' }}>
-                  ⏹ Disable Protection
-                </button>
-              )}
-              {proxyRunning && (
-                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                  <div style={{ width: 10, height: 10, borderRadius: '50%', background: '#10b981', animation: 'pulse-green 2s infinite' }} />
-                  <span style={{ color: '#10b981', fontWeight: 600, fontSize: 13 }}>PROTECTION ACTIVE on port {proxyPort}</span>
+            <h3 style={{ fontSize: 16, fontWeight: 700, marginBottom: 14 }}>📊 Live Attack Data</h3>
+            {attackData && attackData.active ? (
+              <>
+                <div style={{
+                  padding: '12px 16px', marginBottom: 16, borderRadius: 10,
+                  background: protectionEnabled ? 'rgba(16,185,129,0.1)' : 'rgba(239,68,68,0.1)',
+                  border: `1px solid ${protectionEnabled ? 'rgba(16,185,129,0.3)' : 'rgba(239,68,68,0.3)'}`,
+                  display: 'flex', alignItems: 'center', gap: 10,
+                }}>
+                  <div style={{
+                    width: 10, height: 10, borderRadius: '50%',
+                    background: protectionEnabled ? '#10b981' : '#ef4444',
+                    animation: 'pulse-red 1s infinite',
+                  }} />
+                  <span style={{ fontWeight: 600, fontSize: 13, color: protectionEnabled ? '#10b981' : '#ef4444' }}>
+                    {protectionEnabled
+                      ? '🛡️ ATTACK DETECTED & BLOCKED — ShieldWall is protecting the target'
+                      : '🚨 ACTIVE ATTACK DETECTED — Enable protection to block it!'}
+                  </span>
                 </div>
-              )}
-            </div>
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: 14 }}>
+                  <StatCard icon="🎯" label="Target" value={`${attackData.target}:${attackData.port}`} color="#ef4444" />
+                  <StatCard icon="⚡" label="Volleys Sent" value={String(attackData.totalVolleys)} color="#f59e0b" />
+                  <StatCard icon="🔗" label="Connections" value={String(attackData.totalConnections)} color="#00d4ff" />
+                  <StatCard icon="❌" label="Failed" value={String(attackData.totalFailed)} color="#ef4444" />
+                  <StatCard icon={protectionEnabled ? '🛡️' : '⚠️'} label={protectionEnabled ? 'Blocked' : 'Unblocked'} value={protectionEnabled ? String(attackData.totalVolleys) : '0'} color={protectionEnabled ? '#10b981' : '#ef4444'} />
+                  <StatCard icon="🌐" label="Attacker IP" value={attackData.attackerIP} color="#8b5cf6" />
+                </div>
+                <p style={{ fontSize: 11, color: '#666', marginTop: 12 }}>
+                  Last updated: {new Date(attackData.lastUpdate).toLocaleTimeString()}
+                </p>
+              </>
+            ) : (
+              <div style={{ textAlign: 'center', padding: 40, color: 'var(--text-secondary)' }}>
+                <p style={{ fontSize: 40, marginBottom: 12 }}>📡</p>
+                <p style={{ fontSize: 14, fontWeight: 600 }}>No active attack detected</p>
+                <p style={{ fontSize: 12, marginTop: 6 }}>
+                  When <code style={{ color: '#00d4ff' }}>dos.cpp</code> runs from Google Cloud Shell, live attack data will appear here.
+                </p>
+              </div>
+            )}
           </div>
 
-          {/* Proxy Stats */}
-          {proxyRunning && (
-            <>
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: 14, marginBottom: 20 }}>
-                <StatCard icon="✅" label="Forwarded" value={String(proxyForwarded)} color="#10b981" />
-                <StatCard icon="🚫" label="Blocked / Rate Limited" value={String(proxyBlocked)} color="#ef4444" />
-                <StatCard icon="🔒" label="Blocked IPs" value={String(blockedIPs.length)} color="#f59e0b" />
-                <StatCard icon="📡" label="Proxy Port" value={proxyPort} color="#00d4ff" />
-              </div>
-
-              <div className="glass-card" style={{ padding: 24 }}>
-                <h3 style={{ fontSize: 16, fontWeight: 700, marginBottom: 12 }}>📋 Usage Instructions</h3>
-                <div style={{ fontSize: 13, color: 'var(--text-secondary)', lineHeight: 1.8 }}>
-                  <p><strong style={{ color: '#00d4ff' }}>Route traffic through ShieldWall to protect the website:</strong></p>
-                  <ol style={{ paddingLeft: 20, marginTop: 8 }}>
-                    <li>ShieldWall proxy is now listening on <code style={{ color: '#10b981', background: 'rgba(16,185,129,0.1)', padding: '2px 6px', borderRadius: 4 }}>http://localhost:{proxyPort}</code></li>
-                    <li>Point your DNS / load balancer / client to <code style={{ color: '#10b981', background: 'rgba(16,185,129,0.1)', padding: '2px 6px', borderRadius: 4 }}>localhost:{proxyPort}</code> instead of the real server</li>
-                    <li>All traffic will be filtered through ShieldWall before reaching the target</li>
-                    <li>IPs exceeding <strong>{config?.rateLimit || 50} req/s</strong> get rate-limited, auto-blocked after <strong>{config?.autoBlockThreshold || 5} violations</strong></li>
-                    <li>Blocked IPs get <span style={{ color: '#ef4444' }}>403 Forbidden</span> — the real server never sees their requests</li>
-                  </ol>
-                  <p style={{ marginTop: 12 }}><strong style={{ color: '#f59e0b' }}>To test:</strong> Launch an attack via the Attack Sim tab targeting <code style={{ color: '#10b981', background: 'rgba(16,185,129,0.1)', padding: '2px 6px', borderRadius: 4 }}>localhost:{proxyPort}</code> — watch blocked count increase while the target stays safe.</p>
-                </div>
-              </div>
-            </>
-          )}
+          {/* Stats Summary */}
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: 14, marginBottom: 20 }}>
+            <StatCard icon="🛡️" label="Protection" value={protectionEnabled ? 'ON' : 'OFF'} color={protectionEnabled ? '#10b981' : '#ef4444'} />
+            <StatCard icon="🚫" label="Total Blocked" value={String(proxyBlocked)} color="#ef4444" />
+            <StatCard icon="✅" label="Total Passed" value={String(proxyForwarded)} color="#10b981" />
+            <StatCard icon="🔒" label="Blocked IPs" value={String(blockedIPs.length)} color="#f59e0b" />
+          </div>
         </div>
       )}
 

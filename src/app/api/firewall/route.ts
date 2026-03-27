@@ -40,7 +40,16 @@ export async function POST(request: NextRequest) {
         return NextResponse.json({ success: true, config: store.config });
       }
       case 'toggleProtection': {
-        store.protectionEnabled = !store.protectionEnabled;
+        const newState = body.enabled !== undefined ? body.enabled : !store.protectionEnabled;
+        store.protectionEnabled = newState;
+        store.protectionLockedOn = newState;
+        store.addAlert({
+          type: newState ? 'attack_stopped' : 'attack_detected',
+          message: newState
+            ? '🛡️ Protection ENABLED — ShieldWall firewall is now active. Attacks will be blocked.'
+            : '⚠️ Protection DISABLED — ShieldWall firewall is now off.',
+          severity: newState ? 'info' : 'warning',
+        });
         return NextResponse.json({ success: true, protectionEnabled: store.protectionEnabled });
       }
       default:
