@@ -1,0 +1,702 @@
+'use client';
+
+import { useState, useEffect, useCallback } from 'react';
+import {
+  AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip,
+  ResponsiveContainer, Legend,
+} from 'recharts';
+
+// ==========================================
+// Types
+// ==========================================
+interface HealthProbe {
+  timestamp: number;
+  responseTime: number;
+  statusCode: number;
+  available: boolean;
+  error?: string;
+}
+
+interface BlockedIP {
+  ip: string;
+  reason: string;
+  blockedAt: number;
+  requestCount: number;
+  autoBlocked: boolean;
+}
+
+interface AlertEntry {
+  id: string;
+  timestamp: number;
+  type: string;
+  message: string;
+  severity: 'info' | 'warning' | 'critical';
+}
+
+interface HealthStats {
+  avgResponseTime: number;
+  availability: number;
+  currentStatus: string;
+}
+
+interface FullState {
+  targetUrl: string;
+  monitoring: boolean;
+  healthStats: HealthStats;
+  healthProbes: HealthProbe[];
+  protectionEnabled: boolean;
+  blockedIPs: BlockedIP[];
+  alerts: AlertEntry[];
+  config: {
+    rateLimit: number;
+    rateLimitWindow: number;
+    autoBlockThreshold: number;
+    alertEmailEnabled: boolean;
+    alertEmail: string;
+    alertTrafficThreshold: number;
+    smtpHost: string;
+    smtpPort: number;
+    smtpUser: string;
+    smtpPass: string;
+  };
+}
+
+// ==========================================
+// Dashboard
+// ==========================================
+export default function Dashboard() {
+  // State
+  const [targetUrl, setTargetUrl] = useState('');
+  const [monitoring, setMonitoring] = useState(false);
+  const [probes, setProbes] = useState<HealthProbe[]>([]);
+  const [healthStats, setHealthStats] = useState<HealthStats>({ avgResponseTime: 0, availability: 100, currentStatus: 'unknown' });
+  const [blockedIPs, setBlockedIPs] = useState<BlockedIP[]>([]);
+  const [alerts, setAlerts] = useState<AlertEntry[]>([]);
+  const [blockIPInput, setBlockIPInput] = useState('');
+  const [activeTab, setActiveTab] = useState<'monitor' | 'protect' | 'firewall' | 'alerts' | 'settings'>('monitor');
+  const [config, setConfig] = useState<FullState['config'] | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [statusMsg, setStatusMsg] = useState('');
+  // Proxy protection state
+  const [proxyRunning, setProxyRunning] = useState(false);
+  const [proxyPort, setProxyPort] = useState('8080');
+  const [proxyTarget, setProxyTarget] = useState('');
+  const [proxyForwarded, setProxyForwarded] = useState(0);
+  const [proxyBlocked, setProxyBlocked] = useState(0);
+
+  // ---- Fetch full state ----
+  const fetchState = useCallback(async () => {
+    try {
+      const [monRes, fwRes, alertRes, proxyRes] = await Promise.all([
+        fetch('/api/monitor'),
+        fetch('/api/firewall'),
+        fetch('/api/alerts'),
+        fetch('/api/proxy'),
+      ]);
+      const mon = await monRes.json();
+      const fw = await fwRes.json();
+      const al = await alertRes.json();
+      const proxy = await proxyRes.json();
+
+      if (mon.targetUrl) setTargetUrl(mon.targetUrl);
+      setMonitoring(mon.monitoring);
+      setProbes(mon.healthProbes || []);
+      setHealthStats(mon.healthStats || { avgResponseTime: 0, availability: 100, currentStatus: 'unknown' });
+      setBlockedIPs(fw.blockedIPs || []);
+      setConfig(fw.config);
+      setAlerts(al.alerts || []);
+      setProxyRunning(proxy.running || false);
+      if (proxy.port) setProxyPort(String(proxy.port));
+      setProxyForwarded(proxy.totalForwarded || 0);
+      setProxyBlocked(proxy.totalBlocked || 0);
+    } catch (err) {
+      console.error('Fetch error:', err);
+    }
+  }, []);
+
+  // ---- SSE for real-time updates ----
+  useEffect(() => {
+    fetchState();
+
+    const es = new EventSource('/api/monitor/stream');
+
+    es.addEventListener('init', (event: MessageEvent) => {
+      try {
+        const data: FullState = JSON.parse(event.data);
+        if (data.targetUrl) setTargetUrl(data.targetUrl);
+        setMonitoring(data.monitoring);
+        setProbes(data.healthProbes || []);
+        setHealthStats(data.healthStats);
+        setBlockedIPs(data.blockedIPs || []);
+        setAlerts(data.alerts || []);
+        setConfig(data.config);
+      } catch { /* ignore */ }
+    });
+
+    es.addEventListener('health', (event: MessageEvent) => {
+      try {
+        const probe: HealthProbe = JSON.parse(event.data);
+        setProbes(prev => [...prev.slice(-300), probe]);
+        // Update stats locally
+        setHealthStats(prev => ({
+          ...prev,
+          currentStatus: probe.available ? 'online' : 'down',
+          avgResponseTime: probe.available ? Math.round((prev.avgResponseTime * 0.8) + (probe.responseTime * 0.2)) : prev.avgResponseTime,
+        }));
+      } catch { /* ignore */ }
+    });
+
+    es.addEventListener('alert', (event: MessageEvent) => {
+      try {
+        const alert: AlertEntry = JSON.parse(event.data);
+        setAlerts(prev => [alert, ...prev.slice(0, 49)]);
+      } catch { /* ignore */ }
+    });
+
+    es.addEventListener('blocked', () => {
+      fetchState(); // Refresh blocked IPs
+    });
+
+    es.onerror = () => {
+      es.close();
+      setTimeout(() => fetchState(), 3000);
+    };
+
+    // Poll every 5s as backup
+    const poll = setInterval(fetchState, 5000);
+
+    return () => { es.close(); clearInterval(poll); };
+  }, [fetchState]);
+
+  // ---- Actions ----
+  const startMonitor = async () => {
+    if (!targetUrl.trim()) return;
+    setLoading(true);
+    setStatusMsg('');
+    const res = await fetch('/api/monitor', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'start', url: targetUrl.trim() }),
+    });
+    const data = await res.json();
+    setMonitoring(data.monitoring || false);
+    if (data.targetUrl) setTargetUrl(data.targetUrl);
+    setLoading(false);
+    setStatusMsg('✅ Monitoring started!');
+  };
+
+  const stopMonitor = async () => {
+    await fetch('/api/monitor', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'stop' }),
+    });
+    setMonitoring(false);
+    setStatusMsg('Monitoring stopped.');
+  };
+
+  const blockIP = async () => {
+    if (!blockIPInput.trim()) return;
+    await fetch('/api/firewall', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'blockIP', targetIP: blockIPInput.trim(), reason: 'Manually blocked' }),
+    });
+    setBlockIPInput('');
+    fetchState();
+  };
+
+  const unblockIP = async (ip: string) => {
+    await fetch('/api/firewall', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'unblockIP', targetIP: ip }),
+    });
+    fetchState();
+  };
+
+  const saveSettings = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!config) return;
+    await Promise.all([
+      fetch('/api/firewall', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'updateConfig', config: {
+          rateLimit: config.rateLimit,
+          rateLimitWindow: config.rateLimitWindow,
+          autoBlockThreshold: config.autoBlockThreshold,
+        }}),
+      }),
+      fetch('/api/alerts', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(config),
+      }),
+    ]);
+    setStatusMsg('✅ Settings saved!');
+    setTimeout(() => setStatusMsg(''), 3000);
+  };
+
+  // ---- Proxy protection actions ----
+  const startProxy = async () => {
+    if (!proxyTarget.trim()) return;
+    setLoading(true);
+    const res = await fetch('/api/proxy', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'start', targetUrl: proxyTarget.trim(), port: parseInt(proxyPort) || 8080 }),
+    });
+    const data = await res.json();
+    if (data.success) {
+      setProxyRunning(true);
+      setStatusMsg(`🛡️ Protection active on port ${proxyPort}!`);
+    } else {
+      setStatusMsg(`❌ ${data.error}`);
+    }
+    setLoading(false);
+  };
+
+  const stopProxy = async () => {
+    const res = await fetch('/api/proxy', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'stop' }),
+    });
+    const data = await res.json();
+    if (data.success) {
+      setProxyRunning(false);
+      setStatusMsg('⚠️ Protection disabled.');
+    } else {
+      setStatusMsg(`❌ ${data.error}`);
+    }
+  };
+
+  // ---- Chart data ----
+  const chartData = probes.slice(-80).map(p => ({
+    time: new Date(p.timestamp).toLocaleTimeString(),
+    'Response Time (ms)': p.available ? p.responseTime : null,
+    'Down': !p.available ? 1 : null,
+  }));
+
+  const isDown = healthStats.currentStatus === 'down';
+  const isUnderStress = healthStats.avgResponseTime > 2000;
+
+  return (
+    <div style={{ minHeight: '100vh', padding: '20px 28px', maxWidth: 1400, margin: '0 auto' }}>
+      {/* ======== HEADER ======== */}
+      <header style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 24, flexWrap: 'wrap', gap: 16 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
+          <div style={{
+            width: 50, height: 50, borderRadius: 14,
+            background: 'linear-gradient(135deg, #00d4ff, #8b5cf6)',
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            fontSize: 26, boxShadow: '0 0 25px rgba(0, 212, 255, 0.3)',
+          }}>🛡️</div>
+          <div>
+            <h1 style={{
+              fontSize: 28, fontWeight: 800,
+              background: 'linear-gradient(135deg, #00d4ff, #8b5cf6)',
+              WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent',
+            }}>ShieldWall</h1>
+            <p style={{ fontSize: 11, color: 'var(--text-secondary)', marginTop: 1 }}>
+              DDoS Prevention & Live Website Monitoring
+            </p>
+          </div>
+        </div>
+        {statusMsg && (
+          <div style={{ padding: '8px 16px', borderRadius: 8, background: 'rgba(0,212,255,0.1)', border: '1px solid rgba(0,212,255,0.2)', fontSize: 13 }}>
+            {statusMsg}
+          </div>
+        )}
+      </header>
+
+      {/* ======== WEBSITE STATUS BAR ======== */}
+      {monitoring && (
+        <div
+          className={`glass-card ${isDown ? 'attack-pulse' : isUnderStress ? 'attack-pulse' : 'safe-pulse'}`}
+          style={{
+            padding: '14px 24px', marginBottom: 20,
+            background: isDown ? 'linear-gradient(135deg, rgba(239,68,68,0.15), rgba(249,115,22,0.1))'
+              : isUnderStress ? 'linear-gradient(135deg, rgba(245,158,11,0.12), rgba(239,68,68,0.08))'
+              : 'linear-gradient(135deg, rgba(16,185,129,0.1), rgba(6,182,212,0.08))',
+            display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+            border: isDown ? '1px solid rgba(239,68,68,0.3)' : isUnderStress ? '1px solid rgba(245,158,11,0.3)' : '1px solid rgba(16,185,129,0.2)',
+          }}
+        >
+          <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+            <div style={{
+              width: 12, height: 12, borderRadius: '50%',
+              background: isDown ? '#ef4444' : isUnderStress ? '#f59e0b' : '#10b981',
+              boxShadow: `0 0 10px ${isDown ? '#ef4444' : isUnderStress ? '#f59e0b' : '#10b981'}`,
+            }} />
+            <span style={{ fontWeight: 700, fontSize: 14 }}>
+              {isDown ? `🚨 ${targetUrl} is DOWN — Possible DDoS attack!`
+                : isUnderStress ? `⚠️ ${targetUrl} is under stress — High latency detected`
+                : `✅ ${targetUrl} is Online — ${healthStats.avgResponseTime}ms avg response`}
+            </span>
+          </div>
+          <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+            <span className={`badge ${isDown ? 'badge-danger' : isUnderStress ? 'badge-warning' : 'badge-success'}`}>
+              {isDown ? 'DOWN' : isUnderStress ? 'STRESSED' : 'ONLINE'}
+            </span>
+            <span className="badge badge-info">{healthStats.availability}% uptime</span>
+          </div>
+        </div>
+      )}
+
+      {/* ======== TAB NAVIGATION ======== */}
+      <div style={{ display: 'flex', gap: 4, marginBottom: 20, flexWrap: 'wrap' }}>
+        {([
+          { key: 'monitor', icon: '📡', label: 'Monitor' },
+          { key: 'protect', icon: '🛡️', label: 'Protect' },
+          { key: 'firewall', icon: '🚫', label: 'Block IPs' },
+          { key: 'alerts', icon: '🔔', label: 'Alerts' },
+          { key: 'settings', icon: '⚙️', label: 'Settings' },
+        ] as const).map(tab => (
+          <button
+            key={tab.key}
+            onClick={() => setActiveTab(tab.key as typeof activeTab)}
+            style={{
+              padding: '10px 22px', borderRadius: 10, border: 'none', cursor: 'pointer',
+              fontSize: 13, fontWeight: 600, transition: 'all 0.2s',
+              background: activeTab === tab.key ? 'linear-gradient(135deg, #00d4ff, #8b5cf6)' : 'rgba(255,255,255,0.04)',
+              color: activeTab === tab.key ? '#fff' : 'var(--text-secondary)',
+            }}
+          >
+            {tab.icon} {tab.label}
+            {tab.key === 'protect' && proxyRunning && (
+              <span style={{ marginLeft: 6, width: 8, height: 8, borderRadius: '50%', background: '#10b981', display: 'inline-block', animation: 'pulse-green 2s infinite' }} />
+            )}
+          </button>
+        ))}
+      </div>
+
+      {/* ======== MONITOR TAB ======== */}
+      {activeTab === 'monitor' && (
+        <div className="fade-in">
+          {/* URL Input */}
+          <div className="glass-card" style={{ padding: 24, marginBottom: 20 }}>
+            <h3 style={{ fontSize: 16, fontWeight: 700, marginBottom: 14 }}>📡 Monitor Website</h3>
+            <p style={{ fontSize: 13, color: 'var(--text-secondary)', marginBottom: 14 }}>
+              Enter any website URL to monitor its health in real-time. ShieldWall will ping it every 1.5 seconds and track response time, availability, and detect attacks.
+            </p>
+            <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap' }}>
+              <input
+                className="input-field"
+                placeholder="Enter website URL (e.g. https://example.com or localhost:3000)"
+                value={targetUrl}
+                onChange={e => setTargetUrl(e.target.value)}
+                onKeyDown={e => e.key === 'Enter' && !monitoring && startMonitor()}
+                style={{ flex: 1, minWidth: 300 }}
+                disabled={monitoring}
+              />
+              {!monitoring ? (
+                <button className="btn-primary" onClick={startMonitor} disabled={loading || !targetUrl.trim()}>
+                  {loading ? '⏳ Starting...' : '▶ Start Monitoring'}
+                </button>
+              ) : (
+                <button className="btn-danger" onClick={stopMonitor}>
+                  ⏹ Stop Monitoring
+                </button>
+              )}
+            </div>
+          </div>
+
+          {/* Stats Cards */}
+          {monitoring && (
+            <>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 14, marginBottom: 20 }}>
+                <StatCard icon="📡" label="Status" value={healthStats.currentStatus.toUpperCase()} color={isDown ? '#ef4444' : '#10b981'} />
+                <StatCard icon="⏱️" label="Avg Response" value={`${healthStats.avgResponseTime}ms`} color={healthStats.avgResponseTime > 2000 ? '#f59e0b' : '#00d4ff'} />
+                <StatCard icon="📊" label="Availability" value={`${healthStats.availability}%`} color={healthStats.availability < 80 ? '#ef4444' : '#10b981'} />
+                <StatCard icon="📦" label="Probes Sent" value={String(probes.length)} color="#8b5cf6" />
+                <StatCard icon="🚫" label="Blocked IPs" value={String(blockedIPs.length)} color="#f59e0b" />
+              </div>
+
+              {/* Live Chart */}
+              <div className="glass-card" style={{ padding: 24, marginBottom: 20 }}>
+                <h3 style={{ fontSize: 16, fontWeight: 700, marginBottom: 16 }}>📈 Live Response Time</h3>
+                <ResponsiveContainer width="100%" height={320}>
+                  <AreaChart data={chartData}>
+                    <defs>
+                      <linearGradient id="colorRT" x1="0" y1="0" x2="0" y2="1">
+                        <stop offset="5%" stopColor="#00d4ff" stopOpacity={0.4} />
+                        <stop offset="95%" stopColor="#00d4ff" stopOpacity={0} />
+                      </linearGradient>
+                    </defs>
+                    <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.05)" />
+                    <XAxis dataKey="time" stroke="#555" tick={{ fontSize: 10 }} interval="preserveStartEnd" />
+                    <YAxis stroke="#555" tick={{ fontSize: 11 }} label={{ value: 'ms', position: 'insideLeft', style: { fill: '#666' } }} />
+                    <Tooltip contentStyle={{ background: 'rgba(15,15,40,0.95)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: 10, fontSize: 12 }} />
+                    <Legend />
+                    <Area type="monotone" dataKey="Response Time (ms)" stroke="#00d4ff" fill="url(#colorRT)" strokeWidth={2} connectNulls={false} dot={false} />
+                  </AreaChart>
+                </ResponsiveContainer>
+              </div>
+
+              {/* Recent probes table */}
+              <div className="glass-card" style={{ padding: 24, overflow: 'auto' }}>
+                <h3 style={{ fontSize: 16, fontWeight: 700, marginBottom: 16 }}>📋 Recent Health Probes</h3>
+                <table className="data-table">
+                  <thead>
+                    <tr>
+                      <th>Time</th>
+                      <th>Status</th>
+                      <th>HTTP Code</th>
+                      <th>Response Time</th>
+                      <th>Error</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {probes.slice(-20).reverse().map((p, i) => (
+                      <tr key={i}>
+                        <td>{new Date(p.timestamp).toLocaleTimeString()}</td>
+                        <td>
+                          <span className={`badge ${p.available ? 'badge-success' : 'badge-danger'}`}>
+                            {p.available ? 'UP' : 'DOWN'}
+                          </span>
+                        </td>
+                        <td style={{ color: p.statusCode >= 400 ? '#ef4444' : p.statusCode >= 200 ? '#10b981' : '#888' }}>
+                          {p.statusCode || '—'}
+                        </td>
+                        <td style={{ color: p.responseTime > 3000 ? '#ef4444' : p.responseTime > 1000 ? '#f59e0b' : '#10b981' }}>
+                          {p.responseTime}ms
+                        </td>
+                        <td style={{ color: '#ef4444', fontSize: 11 }}>{p.error || '—'}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </>
+          )}
+        </div>
+      )}
+
+      {/* ======== PROTECT TAB ======== */}
+      {activeTab === 'protect' && (
+        <div className="fade-in">
+          {/* How it works */}
+          <div className="glass-card" style={{ padding: 24, marginBottom: 20, borderLeft: '4px solid #00d4ff' }}>
+            <h3 style={{ fontSize: 16, fontWeight: 700, marginBottom: 10 }}>🛡️ How Protection Works</h3>
+            <p style={{ fontSize: 13, color: 'var(--text-secondary)', lineHeight: 1.7 }}>
+              ShieldWall starts a <strong style={{ color: '#00d4ff' }}>reverse proxy server</strong> on your machine.
+              Instead of traffic going directly to the target website, it flows through ShieldWall first.
+              Every request is checked against <strong style={{ color: '#f59e0b' }}>rate limits</strong> and the{' '}
+              <strong style={{ color: '#ef4444' }}>blocked IP list</strong>. Malicious requests get dropped with 403/429 responses.
+              Only clean traffic is forwarded to the real website.
+            </p>
+            <div style={{ marginTop: 12, padding: '10px 16px', background: 'rgba(0,212,255,0.06)', borderRadius: 8, fontSize: 12, color: 'var(--text-secondary)' }}>
+              <strong>Flow:</strong> Attacker → <span style={{ color: '#00d4ff' }}>ShieldWall (port {proxyPort})</span> → Rate Limit Check → IP Block Check → <span style={{ color: '#10b981' }}>Target Website</span>
+            </div>
+            <div style={{ marginTop: 14, padding: '12px 16px', background: 'rgba(239,68,68,0.06)', borderRadius: 8, fontSize: 12, color: '#f59e0b', border: '1px solid rgba(239,68,68,0.15)' }}>
+              <strong>⚠️ Important:</strong> ShieldWall can only protect websites whose traffic flows through it. You must control the server or DNS to route traffic through ShieldWall. You <strong>cannot</strong> stop an attack on someone else&apos;s website from your laptop.
+            </div>
+          </div>
+
+          {/* Deployment Guide */}
+          <div className="glass-card" style={{ padding: 24, marginBottom: 20, borderLeft: '4px solid #10b981' }}>
+            <h3 style={{ fontSize: 16, fontWeight: 700, marginBottom: 10 }}>🚀 How to Deploy</h3>
+            <div style={{ fontSize: 13, color: 'var(--text-secondary)', lineHeight: 1.8 }}>
+              <p><strong style={{ color: '#10b981' }}>To protect a live website, deploy ShieldWall on the same server (or in the same network):</strong></p>
+              <ol style={{ paddingLeft: 20, marginTop: 8 }}>
+                <li>Install ShieldWall on the <strong>web server</strong> that hosts the website</li>
+                <li>Set the <strong>Target Website URL</strong> below to the website&apos;s internal address (e.g. <code style={{ color: '#10b981', background: 'rgba(16,185,129,0.1)', padding: '2px 6px', borderRadius: 4 }}>http://localhost:80</code>)</li>
+                <li>Set the <strong>Proxy Listen Port</strong> (e.g. 8080)</li>
+                <li>Update your <strong>DNS / reverse proxy / load balancer</strong> to point to ShieldWall&apos;s port instead of the original</li>
+                <li>All incoming traffic now flows through ShieldWall — malicious IPs get <span style={{ color: '#ef4444' }}>blocked</span>, clean traffic gets <span style={{ color: '#10b981' }}>forwarded</span></li>
+              </ol>
+              <p style={{ marginTop: 10 }}>This is exactly how <strong>Cloudflare, AWS Shield</strong>, and other DDoS protection services work.</p>
+            </div>
+          </div>
+          {/* Proxy controls */}
+          <div className="glass-card" style={{ padding: 24, marginBottom: 20 }}>
+            <h3 style={{ fontSize: 16, fontWeight: 700, marginBottom: 14 }}>🚀 Start Protection</h3>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: 12, marginBottom: 16 }}>
+              <div>
+                <label style={{ fontSize: 12, color: 'var(--text-secondary)', display: 'block', marginBottom: 4 }}>Target Website URL</label>
+                <input className="input-field" value={proxyTarget} onChange={e => setProxyTarget(e.target.value)}
+                  placeholder="e.g. http://localhost:4000 or http://example.com" disabled={proxyRunning} />
+              </div>
+              <div>
+                <label style={{ fontSize: 12, color: 'var(--text-secondary)', display: 'block', marginBottom: 4 }}>Proxy Listen Port</label>
+                <input className="input-field" value={proxyPort} onChange={e => setProxyPort(e.target.value)}
+                  placeholder="8080" disabled={proxyRunning} />
+              </div>
+            </div>
+            <div style={{ display: 'flex', gap: 12, alignItems: 'center' }}>
+              {!proxyRunning ? (
+                <button className="btn-primary" onClick={startProxy} disabled={loading || !proxyTarget.trim()}
+                  style={{ fontSize: 14, padding: '12px 32px' }}>
+                  🛡️ Enable Protection
+                </button>
+              ) : (
+                <button className="btn-danger" onClick={stopProxy} style={{ fontSize: 14, padding: '12px 32px' }}>
+                  ⏹ Disable Protection
+                </button>
+              )}
+              {proxyRunning && (
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                  <div style={{ width: 10, height: 10, borderRadius: '50%', background: '#10b981', animation: 'pulse-green 2s infinite' }} />
+                  <span style={{ color: '#10b981', fontWeight: 600, fontSize: 13 }}>PROTECTION ACTIVE on port {proxyPort}</span>
+                </div>
+              )}
+            </div>
+          </div>
+
+          {/* Proxy Stats */}
+          {proxyRunning && (
+            <>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: 14, marginBottom: 20 }}>
+                <StatCard icon="✅" label="Forwarded" value={String(proxyForwarded)} color="#10b981" />
+                <StatCard icon="🚫" label="Blocked / Rate Limited" value={String(proxyBlocked)} color="#ef4444" />
+                <StatCard icon="🔒" label="Blocked IPs" value={String(blockedIPs.length)} color="#f59e0b" />
+                <StatCard icon="📡" label="Proxy Port" value={proxyPort} color="#00d4ff" />
+              </div>
+
+              <div className="glass-card" style={{ padding: 24 }}>
+                <h3 style={{ fontSize: 16, fontWeight: 700, marginBottom: 12 }}>📋 Usage Instructions</h3>
+                <div style={{ fontSize: 13, color: 'var(--text-secondary)', lineHeight: 1.8 }}>
+                  <p><strong style={{ color: '#00d4ff' }}>Route traffic through ShieldWall to protect the website:</strong></p>
+                  <ol style={{ paddingLeft: 20, marginTop: 8 }}>
+                    <li>ShieldWall proxy is now listening on <code style={{ color: '#10b981', background: 'rgba(16,185,129,0.1)', padding: '2px 6px', borderRadius: 4 }}>http://localhost:{proxyPort}</code></li>
+                    <li>Point your DNS / load balancer / client to <code style={{ color: '#10b981', background: 'rgba(16,185,129,0.1)', padding: '2px 6px', borderRadius: 4 }}>localhost:{proxyPort}</code> instead of the real server</li>
+                    <li>All traffic will be filtered through ShieldWall before reaching the target</li>
+                    <li>IPs exceeding <strong>{config?.rateLimit || 50} req/s</strong> get rate-limited, auto-blocked after <strong>{config?.autoBlockThreshold || 5} violations</strong></li>
+                    <li>Blocked IPs get <span style={{ color: '#ef4444' }}>403 Forbidden</span> — the real server never sees their requests</li>
+                  </ol>
+                  <p style={{ marginTop: 12 }}><strong style={{ color: '#f59e0b' }}>To test:</strong> Launch an attack via the Attack Sim tab targeting <code style={{ color: '#10b981', background: 'rgba(16,185,129,0.1)', padding: '2px 6px', borderRadius: 4 }}>localhost:{proxyPort}</code> — watch blocked count increase while the target stays safe.</p>
+                </div>
+              </div>
+            </>
+          )}
+        </div>
+      )}
+
+      {/* ======== FIREWALL TAB ======== */}
+      {activeTab === 'firewall' && (
+        <div className="fade-in">
+          <div className="glass-card" style={{ padding: 24, marginBottom: 20 }}>
+            <h3 style={{ fontSize: 16, fontWeight: 700, marginBottom: 14 }}>🚫 Block IP Address</h3>
+            <p style={{ fontSize: 13, color: 'var(--text-secondary)', marginBottom: 12 }}>
+              Manually block an IP address from accessing the protected website. Auto-blocked IPs will also appear here.
+            </p>
+            <div style={{ display: 'flex', gap: 12 }}>
+              <input className="input-field" placeholder="e.g. 192.168.1.100" value={blockIPInput} onChange={e => setBlockIPInput(e.target.value)} onKeyDown={e => e.key === 'Enter' && blockIP()} style={{ maxWidth: 350 }} />
+              <button className="btn-danger" onClick={blockIP}>Block IP</button>
+            </div>
+          </div>
+
+          <div className="glass-card" style={{ padding: 24, overflow: 'auto' }}>
+            <h3 style={{ fontSize: 16, fontWeight: 700, marginBottom: 16 }}>Blocked IPs ({blockedIPs.length})</h3>
+            <table className="data-table">
+              <thead><tr><th>IP Address</th><th>Reason</th><th>Blocked At</th><th>Type</th><th>Action</th></tr></thead>
+              <tbody>
+                {blockedIPs.length === 0 && <tr><td colSpan={5} style={{ textAlign: 'center', padding: 30, color: 'var(--text-secondary)' }}>No blocked IPs.</td></tr>}
+                {blockedIPs.map(ip => (
+                  <tr key={ip.ip}>
+                    <td style={{ color: '#ef4444' }}>{ip.ip}</td>
+                    <td>{ip.reason}</td>
+                    <td>{new Date(ip.blockedAt).toLocaleString()}</td>
+                    <td><span className={`badge ${ip.autoBlocked ? 'badge-warning' : 'badge-info'}`}>{ip.autoBlocked ? 'AUTO' : 'MANUAL'}</span></td>
+                    <td><button className="btn-secondary" style={{ padding: '4px 12px', fontSize: 11 }} onClick={() => unblockIP(ip.ip)}>Unblock</button></td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+
+      {/* ======== ALERTS TAB ======== */}
+      {activeTab === 'alerts' && (
+        <div className="fade-in">
+          <div className="glass-card" style={{ padding: 24 }}>
+            <h3 style={{ fontSize: 16, fontWeight: 700, marginBottom: 16 }}>🔔 Alert History</h3>
+            {alerts.length === 0 && <p style={{ color: 'var(--text-secondary)', textAlign: 'center', padding: 30 }}>No alerts yet.</p>}
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+              {alerts.map(a => (
+                <div key={a.id} style={{
+                  padding: '12px 16px', borderRadius: 10,
+                  background: a.severity === 'critical' ? 'rgba(239,68,68,0.08)' : a.severity === 'warning' ? 'rgba(245,158,11,0.06)' : 'rgba(0,212,255,0.04)',
+                  border: `1px solid ${a.severity === 'critical' ? 'rgba(239,68,68,0.15)' : a.severity === 'warning' ? 'rgba(245,158,11,0.12)' : 'rgba(0,212,255,0.08)'}`,
+                }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
+                    <span className={`badge badge-${a.severity === 'critical' ? 'danger' : a.severity === 'warning' ? 'warning' : 'info'}`}>{a.severity}</span>
+                    <span style={{ fontSize: 11, color: '#666' }}>{new Date(a.timestamp).toLocaleString()}</span>
+                  </div>
+                  <p style={{ fontSize: 13 }}>{a.message}</p>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ======== SETTINGS TAB ======== */}
+      {activeTab === 'settings' && config && (
+        <div className="fade-in">
+          <form onSubmit={saveSettings}>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(420px, 1fr))', gap: 20 }}>
+              <div className="glass-card" style={{ padding: 24 }}>
+                <h3 style={{ fontSize: 16, fontWeight: 700, marginBottom: 16 }}>🛡️ Rate Limiting</h3>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+                  <InputField label="Max requests/sec per IP" type="number" value={config.rateLimit} onChange={v => setConfig({ ...config, rateLimit: parseInt(v) || 50 })} />
+                  <InputField label="Window (seconds)" type="number" value={config.rateLimitWindow} onChange={v => setConfig({ ...config, rateLimitWindow: parseInt(v) || 10 })} />
+                  <InputField label="Auto-block after N violations" type="number" value={config.autoBlockThreshold} onChange={v => setConfig({ ...config, autoBlockThreshold: parseInt(v) || 5 })} />
+                </div>
+              </div>
+              <div className="glass-card" style={{ padding: 24 }}>
+                <h3 style={{ fontSize: 16, fontWeight: 700, marginBottom: 16 }}>📧 Email Alerts</h3>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                    <span style={{ fontSize: 13 }}>Enable Email Alerts</span>
+                    <div className={`toggle-switch ${config.alertEmailEnabled ? 'active' : ''}`} onClick={() => setConfig({ ...config, alertEmailEnabled: !config.alertEmailEnabled })} />
+                  </div>
+                  <InputField label="Your Email" type="email" value={config.alertEmail} onChange={v => setConfig({ ...config, alertEmail: v })} placeholder="your@email.com" />
+                  <InputField label="SMTP Host" type="text" value={config.smtpHost} onChange={v => setConfig({ ...config, smtpHost: v })} placeholder="smtp.gmail.com" />
+                  <InputField label="SMTP Port" type="number" value={config.smtpPort} onChange={v => setConfig({ ...config, smtpPort: parseInt(v) || 587 })} />
+                  <InputField label="SMTP User" type="text" value={config.smtpUser} onChange={v => setConfig({ ...config, smtpUser: v })} placeholder="your@gmail.com" />
+                  <InputField label="SMTP Password" type="password" value={config.smtpPass} onChange={v => setConfig({ ...config, smtpPass: v })} placeholder="••••••••" />
+                </div>
+              </div>
+            </div>
+            <div style={{ marginTop: 20 }}>
+              <button type="submit" className="btn-primary" style={{ padding: '12px 40px' }}>💾 Save Settings</button>
+            </div>
+          </form>
+        </div>
+      )}
+
+      {/* Footer */}
+      <footer style={{ marginTop: 40, textAlign: 'center', padding: 16, fontSize: 11, color: '#555', borderTop: '1px solid rgba(255,255,255,0.05)' }}>
+        🛡️ ShieldWall — Monitor any website, detect DDoS attacks, block malicious IPs
+      </footer>
+    </div>
+  );
+}
+
+// ==========================================
+// Sub-components
+// ==========================================
+function StatCard({ icon, label, value, color }: { icon: string; label: string; value: string; color: string }) {
+  return (
+    <div className="glass-card" style={{ padding: '18px 20px' }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
+        <span style={{ fontSize: 11, color: 'var(--text-secondary)', fontWeight: 500 }}>{label}</span>
+        <span style={{ fontSize: 18 }}>{icon}</span>
+      </div>
+      <div className="stat-number" style={{ fontSize: 24, fontWeight: 800, color, letterSpacing: '-0.5px' }}>{value}</div>
+    </div>
+  );
+}
+
+function InputField({ label, type, value, onChange, placeholder }: { label: string; type: string; value: string | number; onChange: (v: string) => void; placeholder?: string }) {
+  return (
+    <div>
+      <label style={{ fontSize: 12, color: 'var(--text-secondary)', display: 'block', marginBottom: 4 }}>{label}</label>
+      <input className="input-field" type={type} value={value} onChange={e => onChange(e.target.value)} placeholder={placeholder} />
+    </div>
+  );
+}
