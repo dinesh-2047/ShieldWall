@@ -95,6 +95,7 @@ class FirewallStore {
 
   // ---- External attack data (from dos.cpp via API) ----
   externalAttackData: ExternalAttackData | null = null;
+  emailSentForCurrentAttack: boolean = false;
 
   // ---- Blocked IPs ----
   blockedIPs: Map<string, BlockedIP> = new Map();

@@ -84,8 +84,11 @@ export default function Dashboard() {
   const [healthStats, setHealthStats] = useState<HealthStats>({ avgResponseTime: 0, availability: 100, currentStatus: 'unknown' });
   const [blockedIPs, setBlockedIPs] = useState<BlockedIP[]>([]);
   const [alerts, setAlerts] = useState<AlertEntry[]>([]);
-  const [blockIPInput, setBlockIPInput] = useState('');
-  const [activeTab, setActiveTab] = useState<'monitor' | 'protect' | 'firewall' | 'alerts' | 'settings'>('monitor');
+  const [activeTab, setActiveTab] = useState<'monitor' | 'protect' | 'attack' | 'alerts' | 'settings'>('monitor');
+  const [attackPassword, setAttackPassword] = useState('');
+  const [attackUnlocked, setAttackUnlocked] = useState(false);
+  const [protectedDomain, setProtectedDomain] = useState('');
+  const [mitigationLogs, setMitigationLogs] = useState<string[]>([]);
   const [config, setConfig] = useState<FullState['config'] | null>(null);
   const [loading, setLoading] = useState(false);
   const [statusMsg, setStatusMsg] = useState('');
@@ -109,12 +112,32 @@ export default function Dashboard() {
       const al = await alertRes.json();
       const atk = await atkRes.json();
 
-      if (mon.targetUrl) setTargetUrl(mon.targetUrl);
-      setMonitoring(mon.monitoring);
+      // Client-side state restoration for Vercel serverless cold starts
+      const wantMonitor = localStorage.getItem('shieldwall_monitor_active') === 'true';
+      const wantProtect = localStorage.getItem('shieldwall_protect_active') === 'true';
+      const savedHost = localStorage.getItem('shieldwall_monitor_url');
+
+      if (wantMonitor && !mon.monitoring && savedHost) {
+        console.log('Restoring Monitor state...');
+        fetch('/api/monitor', { method: 'POST', body: JSON.stringify({ action: 'start', url: savedHost }) });
+        setMonitoring(true);
+        setTargetUrl(savedHost);
+      } else {
+        if (mon.targetUrl) setTargetUrl(mon.targetUrl);
+        setMonitoring(mon.monitoring);
+      }
+
+      if (wantProtect && !fw.protectionEnabled) {
+        console.log('Restoring Protection state...');
+        fetch('/api/firewall', { method: 'POST', body: JSON.stringify({ action: 'toggleProtection', enabled: true }) });
+        setProtectionEnabled(true);
+      } else {
+        setProtectionEnabled(fw.protectionEnabled || false);
+      }
+
       setProbes(mon.healthProbes || []);
       setHealthStats(mon.healthStats || { avgResponseTime: 0, availability: 100, currentStatus: 'unknown' });
       setBlockedIPs(fw.blockedIPs || []);
-      setProtectionEnabled(fw.protectionEnabled || false);
       setConfig(fw.config);
       setAlerts(al.alerts || []);
       setProxyForwarded(fw.totalForwarded || 0);
@@ -181,11 +204,37 @@ export default function Dashboard() {
     return () => { es.close(); clearInterval(poll); };
   }, [fetchState]);
 
+  // Animated mitigation logs
+  useEffect(() => {
+    if (activeTab === 'protect' && protectionEnabled && attackData?.active) {
+      const msgs = [
+        "Analyzing packet signatures...",
+        "Anomaly detected: High connection rate",
+        "Signature matched: Slowloris attack pattern",
+        "Rate-limiting IPs exceeding threshold",
+        "Dropping malformed HTTP headers",
+        `Mitigating attack on ${protectedDomain || attackData.target}...`,
+        "Null-routing malicious traffic",
+        "ShieldWall engine actively filtering..."
+      ];
+      const interval = setInterval(() => {
+        const msg = msgs[Math.floor(Math.random() * msgs.length)];
+        setMitigationLogs(prev => [...prev.slice(-15), `[${new Date().toISOString().split('T')[1].slice(0,-1)}] 🛡️ ${msg}`]);
+      }, 1500);
+      return () => clearInterval(interval);
+    } else {
+      setMitigationLogs([]);
+    }
+  }, [activeTab, protectionEnabled, attackData?.active, protectedDomain]);
+
   // ---- Actions ----
   const startMonitor = async () => {
     if (!targetUrl.trim()) return;
     setLoading(true);
     setStatusMsg('');
+    localStorage.setItem('shieldwall_monitor_active', 'true');
+    localStorage.setItem('shieldwall_monitor_url', targetUrl.trim());
+
     const res = await fetch('/api/monitor', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -199,6 +248,7 @@ export default function Dashboard() {
   };
 
   const stopMonitor = async () => {
+    localStorage.setItem('shieldwall_monitor_active', 'false');
     await fetch('/api/monitor', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -208,25 +258,7 @@ export default function Dashboard() {
     setStatusMsg('Monitoring stopped.');
   };
 
-  const blockIP = async () => {
-    if (!blockIPInput.trim()) return;
-    await fetch('/api/firewall', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ action: 'blockIP', targetIP: blockIPInput.trim(), reason: 'Manually blocked' }),
-    });
-    setBlockIPInput('');
-    fetchState();
-  };
-
-  const unblockIP = async (ip: string) => {
-    await fetch('/api/firewall', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ action: 'unblockIP', targetIP: ip }),
-    });
-    fetchState();
-  };
+  // ---- Actions ----
 
   const saveSettings = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -239,6 +271,8 @@ export default function Dashboard() {
           rateLimit: config.rateLimit,
           rateLimitWindow: config.rateLimitWindow,
           autoBlockThreshold: config.autoBlockThreshold,
+          alertEmailEnabled: config.alertEmailEnabled,
+          alertEmail: config.alertEmail,
         }}),
       }),
       fetch('/api/alerts', {
@@ -350,7 +384,7 @@ export default function Dashboard() {
         {([
           { key: 'monitor', icon: '📡', label: 'Monitor' },
           { key: 'protect', icon: '🛡️', label: 'Protect' },
-          { key: 'firewall', icon: '🚫', label: 'Block IPs' },
+          { key: 'attack', icon: '⚡', label: 'Attack' },
           { key: 'alerts', icon: '🔔', label: 'Alerts' },
           { key: 'settings', icon: '⚙️', label: 'Settings' },
         ] as const).map(tab => (
@@ -487,6 +521,16 @@ export default function Dashboard() {
                     ? 'Firewall is ACTIVE — dos.cpp attack tool will detect this and auto-stop attacks.'
                     : 'Firewall is OFF — the target website is unprotected from attacks.'}
                 </p>
+                <div style={{ marginTop: 16 }}>
+                  <label style={{ fontSize: 12, color: 'var(--text-secondary)', display: 'block', marginBottom: 4 }}>Protected Website URL (Target Simulation)</label>
+                  <input 
+                    className="input-field" 
+                    style={{ maxWidth: 300, background: 'rgba(0,0,0,0.2)', border: '1px solid rgba(255,255,255,0.1)' }}
+                    placeholder="e.g. hackathon-project.com" 
+                    value={protectedDomain} 
+                    onChange={e => setProtectedDomain(e.target.value)} 
+                  />
+                </div>
               </div>
               <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
@@ -505,7 +549,20 @@ export default function Dashboard() {
                 </div>
                 <button
                   className={protectionEnabled ? 'btn-danger' : 'btn-primary'}
-                  onClick={() => toggleProtection(!protectionEnabled)}
+                  onClick={async () => {
+                    setLoading(true);
+                    const newState = !protectionEnabled;
+                    localStorage.setItem('shieldwall_protect_active', newState ? 'true' : 'false');
+                    
+                    const res = await fetch('/api/firewall', {
+                      method: 'POST',
+                      headers: { 'Content-Type': 'application/json' },
+                      body: JSON.stringify({ action: 'toggleProtection', enabled: newState }),
+                    });
+                    const data = await res.json();
+                    setProtectionEnabled(data.protectionEnabled);
+                    setLoading(false);
+                  }}
                   disabled={loading}
                   style={{ fontSize: 14, padding: '12px 32px', minWidth: 180 }}
                 >
@@ -529,48 +586,106 @@ export default function Dashboard() {
             </div>
           </div>
 
-          {/* Live Attack Data from dos.cpp */}
+          {/* Live Data */}
           <div className="glass-card" style={{ padding: 24, marginBottom: 20 }}>
-            <h3 style={{ fontSize: 16, fontWeight: 700, marginBottom: 14 }}>📊 Live Attack Data</h3>
-            {attackData && attackData.active ? (
+            <h3 style={{ fontSize: 16, fontWeight: 700, marginBottom: 14 }}>📊 Live Data</h3>
+            
+            {(attackData && attackData.active) ? (
+              <div style={{
+                padding: '12px 16px', marginBottom: 16, borderRadius: 10,
+                background: protectionEnabled ? 'rgba(16,185,129,0.1)' : 'rgba(239,68,68,0.1)',
+                border: `1px solid ${protectionEnabled ? 'rgba(16,185,129,0.3)' : 'rgba(239,68,68,0.3)'}`,
+                display: 'flex', alignItems: 'center', gap: 10,
+              }}>
+                <div style={{
+                  width: 10, height: 10, borderRadius: '50%',
+                  background: protectionEnabled ? '#10b981' : '#ef4444',
+                  animation: 'pulse-red 1s infinite',
+                }} />
+                <span style={{ fontWeight: 600, fontSize: 13, color: protectionEnabled ? '#10b981' : '#ef4444' }}>
+                  {protectionEnabled
+                    ? '🛡️ ATTACK DETECTED & BLOCKED — ShieldWall is protecting the target'
+                    : '🚨 ACTIVE ATTACK DETECTED — Enable protection to block it!'}
+                </span>
+              </div>
+            ) : (
               <>
                 <div style={{
                   padding: '12px 16px', marginBottom: 16, borderRadius: 10,
-                  background: protectionEnabled ? 'rgba(16,185,129,0.1)' : 'rgba(239,68,68,0.1)',
-                  border: `1px solid ${protectionEnabled ? 'rgba(16,185,129,0.3)' : 'rgba(239,68,68,0.3)'}`,
+                  background: 'rgba(255,255,255,0.05)',
+                  border: '1px solid rgba(255,255,255,0.1)',
                   display: 'flex', alignItems: 'center', gap: 10,
                 }}>
                   <div style={{
                     width: 10, height: 10, borderRadius: '50%',
-                    background: protectionEnabled ? '#10b981' : '#ef4444',
-                    animation: 'pulse-red 1s infinite',
+                    background: '#00d4ff',
+                    animation: 'pulse-blue 1s infinite',
                   }} />
-                  <span style={{ fontWeight: 600, fontSize: 13, color: protectionEnabled ? '#10b981' : '#ef4444' }}>
-                    {protectionEnabled
-                      ? '🛡️ ATTACK DETECTED & BLOCKED — ShieldWall is protecting the target'
-                      : '🚨 ACTIVE ATTACK DETECTED — Enable protection to block it!'}
+                  <span style={{ fontWeight: 600, fontSize: 13, color: '#00d4ff' }}>
+                    📡 Monitoring traffic on {protectedDomain || targetUrl || 'target website'} for anomalies...
                   </span>
                 </div>
-                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: 14 }}>
-                  <StatCard icon="🎯" label="Target" value={`${attackData.target}:${attackData.port}`} color="#ef4444" />
-                  <StatCard icon="⚡" label="Volleys Sent" value={String(attackData.totalVolleys)} color="#f59e0b" />
-                  <StatCard icon="🔗" label="Connections" value={String(attackData.totalConnections)} color="#00d4ff" />
-                  <StatCard icon="❌" label="Failed" value={String(attackData.totalFailed)} color="#ef4444" />
-                  <StatCard icon={protectionEnabled ? '🛡️' : '⚠️'} label={protectionEnabled ? 'Blocked' : 'Unblocked'} value={protectionEnabled ? String(attackData.totalVolleys) : '0'} color={protectionEnabled ? '#10b981' : '#ef4444'} />
-                  <StatCard icon="🌐" label="Attacker IP" value={attackData.attackerIP} color="#8b5cf6" />
-                </div>
-                <p style={{ fontSize: 11, color: '#666', marginTop: 12 }}>
-                  Last updated: {new Date(attackData.lastUpdate).toLocaleTimeString()}
-                </p>
+
+                {monitoring ? (
+                  <div style={{ marginBottom: 20 }}>
+                    <div className={`glass-card ${isDown ? 'attack-pulse' : isUnderStress ? 'attack-pulse' : 'safe-pulse'}`} style={{ padding: '14px 24px', marginBottom: 16, background: isDown ? 'linear-gradient(135deg, rgba(239,68,68,0.15), rgba(249,115,22,0.1))' : isUnderStress ? 'linear-gradient(135deg, rgba(245,158,11,0.12), rgba(239,68,68,0.08))' : 'linear-gradient(135deg, rgba(16,185,129,0.1), rgba(6,182,212,0.08))', display: 'flex', alignItems: 'center', justifyContent: 'space-between', border: isDown ? '1px solid rgba(239,68,68,0.3)' : isUnderStress ? '1px solid rgba(245,158,11,0.3)' : '1px solid rgba(16,185,129,0.2)' }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                        <div style={{ width: 12, height: 12, borderRadius: '50%', background: isDown ? '#ef4444' : isUnderStress ? '#f59e0b' : '#10b981', boxShadow: `0 0 10px ${isDown ? '#ef4444' : isUnderStress ? '#f59e0b' : '#10b981'}` }} />
+                        <span style={{ fontWeight: 700, fontSize: 14 }}>
+                          {isDown ? `🚨 ${targetUrl} is DOWN` : isUnderStress ? `⚠️ ${targetUrl} is under stress` : `✅ ${targetUrl} is Online — ${healthStats.avgResponseTime}ms avg`}
+                        </span>
+                      </div>
+                    </div>
+                    
+                    <div className="glass-card" style={{ padding: 16, height: 200 }}>
+                      <ResponsiveContainer width="100%" height="100%">
+                        <AreaChart data={chartData}>
+                          <defs>
+                            <linearGradient id="colorRT_protect" x1="0" y1="0" x2="0" y2="1">
+                              <stop offset="5%" stopColor={isDown ? "#ef4444" : "#00d4ff"} stopOpacity={0.4} />
+                              <stop offset="95%" stopColor={isDown ? "#ef4444" : "#00d4ff"} stopOpacity={0} />
+                            </linearGradient>
+                          </defs>
+                          <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.05)" />
+                          <XAxis dataKey="time" stroke="#555" tick={{ fontSize: 10 }} interval="preserveStartEnd" />
+                          <YAxis stroke="#555" tick={{ fontSize: 10 }} />
+                          <Tooltip contentStyle={{ background: 'rgba(15,15,40,0.95)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: 10, fontSize: 12 }} />
+                          <Area type="monotone" dataKey="Response Time (ms)" stroke={isDown ? "#ef4444" : "#00d4ff"} fill="url(#colorRT_protect)" strokeWidth={2} connectNulls={false} dot={false} />
+                        </AreaChart>
+                      </ResponsiveContainer>
+                    </div>
+                  </div>
+                ) : (
+                  <div style={{ textAlign: 'center', padding: '30px 20px', background: 'rgba(0,0,0,0.2)', borderRadius: 10, marginBottom: 20 }}>
+                    <p style={{ color: 'var(--text-secondary)', fontSize: 13 }}>⚠️ Background monitor is OFF. Start monitoring from the "Monitor" tab to see live health graphs here.</p>
+                  </div>
+                )}
               </>
-            ) : (
-              <div style={{ textAlign: 'center', padding: 40, color: 'var(--text-secondary)' }}>
-                <p style={{ fontSize: 40, marginBottom: 12 }}>📡</p>
-                <p style={{ fontSize: 14, fontWeight: 600 }}>No active attack detected</p>
-                <p style={{ fontSize: 12, marginTop: 6 }}>
-                  When <code style={{ color: '#00d4ff' }}>dos.cpp</code> runs from Google Cloud Shell, live attack data will appear here.
-                </p>
+            )}
+
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: 14 }}>
+              <StatCard icon="🎯" label="Target" value={protectedDomain || (attackData ? `${attackData.target}:${attackData.port}` : 'None')} color="#ef4444" />
+              <StatCard icon="⚡" label="Volleys Sent" value={attackData?.active ? String(attackData.totalVolleys) : "0"} color="#f59e0b" />
+              <StatCard icon="🔗" label="Connections" value={attackData?.active ? String(attackData.totalConnections) : "0"} color="#00d4ff" />
+              <StatCard icon="❌" label="Failed" value={attackData?.active ? String(attackData.totalFailed) : "0"} color="#ef4444" />
+              <StatCard icon={protectionEnabled ? '🛡️' : '⚠️'} label={protectionEnabled ? 'Blocked' : 'Unblocked'} value={attackData?.active ? (protectionEnabled ? String(attackData.totalVolleys) : '0') : "0"} color={protectionEnabled ? '#10b981' : '#ef4444'} />
+              <StatCard icon="🌐" label="Attacker IP" value={attackData?.active ? attackData.attackerIP : "—"} color="#8b5cf6" />
+            </div>
+
+            {protectionEnabled && attackData?.active && (
+              <div style={{ marginTop: 20, background: '#0a0a0a', border: '1px solid #333', borderRadius: 8, padding: 12, fontFamily: 'monospace', fontSize: 12, color: '#10b981', height: 160, overflowY: 'auto', display: 'flex', flexDirection: 'column-reverse' }}>
+                {mitigationLogs.length === 0 ? (
+                  <span style={{ color: '#666' }}>Waiting for traffic anomalies...</span>
+                ) : (
+                  mitigationLogs.slice().reverse().map((log, i) => <div key={i}>{log}</div>)
+                )}
               </div>
+            )}
+
+            {attackData?.active && (
+              <p style={{ fontSize: 11, color: '#666', marginTop: 12 }}>
+                Last updated: {new Date(attackData.lastUpdate).toLocaleTimeString()}
+              </p>
             )}
           </div>
 
@@ -584,38 +699,55 @@ export default function Dashboard() {
         </div>
       )}
 
-      {/* ======== FIREWALL TAB ======== */}
-      {activeTab === 'firewall' && (
+      {/* ======== ATTACK TAB (Password Protected) ======== */}
+      {activeTab === 'attack' && (
         <div className="fade-in">
-          <div className="glass-card" style={{ padding: 24, marginBottom: 20 }}>
-            <h3 style={{ fontSize: 16, fontWeight: 700, marginBottom: 14 }}>🚫 Block IP Address</h3>
-            <p style={{ fontSize: 13, color: 'var(--text-secondary)', marginBottom: 12 }}>
-              Manually block an IP address from accessing the protected website. Auto-blocked IPs will also appear here.
-            </p>
-            <div style={{ display: 'flex', gap: 12 }}>
-              <input className="input-field" placeholder="e.g. 192.168.1.100" value={blockIPInput} onChange={e => setBlockIPInput(e.target.value)} onKeyDown={e => e.key === 'Enter' && blockIP()} style={{ maxWidth: 350 }} />
-              <button className="btn-danger" onClick={blockIP}>Block IP</button>
+          {!attackUnlocked ? (
+            <div className="glass-card" style={{ padding: 40, textAlign: 'center', maxWidth: 400, margin: '0 auto', marginTop: 40 }}>
+              <h3 style={{ fontSize: 20, fontWeight: 800, marginBottom: 16 }}>🔒 Locked</h3>
+              <p style={{ fontSize: 13, color: 'var(--text-secondary)', marginBottom: 20 }}>
+                Enter the console password to access the attack platform.
+              </p>
+              <form onSubmit={async (e) => {
+                e.preventDefault();
+                setLoading(true);
+                const res = await fetch('/api/auth', { method: 'POST', body: JSON.stringify({ password: attackPassword }) });
+                const ok = await res.json();
+                if (ok.success) {
+                  setAttackUnlocked(true);
+                  setStatusMsg('🔓 Unlocked');
+                } else {
+                  setStatusMsg('❌ Incorrect password');
+                }
+                setLoading(false);
+                setTimeout(() => setStatusMsg(''), 3000);
+              }}>
+                <input type="password" placeholder="Password..." className="input-field" style={{ marginBottom: 16, textAlign: 'center' }}
+                  value={attackPassword} onChange={e => setAttackPassword(e.target.value)} />
+                <button type="submit" className="btn-primary" disabled={loading} style={{ width: '100%' }}>
+                  {loading ? '...' : 'Unlock'}
+                </button>
+              </form>
             </div>
-          </div>
-
-          <div className="glass-card" style={{ padding: 24, overflow: 'auto' }}>
-            <h3 style={{ fontSize: 16, fontWeight: 700, marginBottom: 16 }}>Blocked IPs ({blockedIPs.length})</h3>
-            <table className="data-table">
-              <thead><tr><th>IP Address</th><th>Reason</th><th>Blocked At</th><th>Type</th><th>Action</th></tr></thead>
-              <tbody>
-                {blockedIPs.length === 0 && <tr><td colSpan={5} style={{ textAlign: 'center', padding: 30, color: 'var(--text-secondary)' }}>No blocked IPs.</td></tr>}
-                {blockedIPs.map(ip => (
-                  <tr key={ip.ip}>
-                    <td style={{ color: '#ef4444' }}>{ip.ip}</td>
-                    <td>{ip.reason}</td>
-                    <td>{new Date(ip.blockedAt).toLocaleString()}</td>
-                    <td><span className={`badge ${ip.autoBlocked ? 'badge-warning' : 'badge-info'}`}>{ip.autoBlocked ? 'AUTO' : 'MANUAL'}</span></td>
-                    <td><button className="btn-secondary" style={{ padding: '4px 12px', fontSize: 11 }} onClick={() => unblockIP(ip.ip)}>Unblock</button></td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+          ) : (
+            <div className="glass-card" style={{ padding: 0, height: '70vh', overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
+              <div style={{ padding: '16px 24px', background: 'rgba(0,0,0,0.5)', borderBottom: '1px solid rgba(255,255,255,0.05)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <h3 style={{ fontSize: 16, fontWeight: 700, margin: 0 }}>⚡ Google Cloud Shell</h3>
+                <a href="https://console.cloud.google.com/cloudshell/editor" target="_blank" rel="noreferrer" className="btn-secondary" style={{ padding: '6px 16px', fontSize: 12, textDecoration: 'none' }}>
+                  Open in New Tab ↗
+                </a>
+              </div>
+              <p style={{ padding: '12px 24px', margin: 0, fontSize: 12, color: '#f59e0b', background: 'rgba(245,158,11,0.1)' }}>
+                <strong>Note:</strong> Due to security restrictions, you may need to open Cloud Shell in a new tab if the embedded view refuses to connect.
+              </p>
+              <iframe
+                src="https://console.cloud.google.com/cloudshell/editor"
+                style={{ width: '100%', flex: 1, border: 'none', background: '#000' }}
+                title="Google Cloud Console"
+                sandbox="allow-same-origin allow-scripts allow-popups allow-forms"
+              />
+            </div>
+          )}
         </div>
       )}
 

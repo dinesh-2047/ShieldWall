@@ -22,18 +22,7 @@ export async function POST(request: NextRequest) {
     const { action } = body;
 
     switch (action) {
-      case 'blockIP': {
-        const { targetIP, reason } = body;
-        if (!targetIP) return NextResponse.json({ error: 'targetIP required' }, { status: 400 });
-        store.blockIP(targetIP, reason || 'Manually blocked', 0, false);
-        return NextResponse.json({ success: true, blockedIPs: store.getBlockedIPs() });
-      }
-      case 'unblockIP': {
-        const { targetIP } = body;
-        if (!targetIP) return NextResponse.json({ error: 'targetIP required' }, { status: 400 });
-        store.unblockIP(targetIP);
-        return NextResponse.json({ success: true, blockedIPs: store.getBlockedIPs() });
-      }
+
       case 'updateConfig': {
         const { config } = body;
         if (config) Object.assign(store.config, config);

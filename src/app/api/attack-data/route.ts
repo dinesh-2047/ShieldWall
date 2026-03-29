@@ -5,6 +5,7 @@
 
 import { NextRequest, NextResponse } from 'next/server';
 import { store } from '@/lib/store';
+import { sendAttackReportEmail } from '@/lib/emailReport';
 
 export async function GET() {
   return NextResponse.json({
@@ -37,9 +38,29 @@ export async function POST(request: NextRequest) {
       if (store.protectionEnabled) {
         store.totalProxyBlocked = store.externalAttackData.totalVolleys;
         store.totalProxyForwarded = 0; // All traffic blocked when protected
+
+        if (status === 'running') {
+          store.emailSentForCurrentAttack = false;
+        }
+
+        // Send post-incident email report when attack stops
+        if (status === 'stopped' && !store.emailSentForCurrentAttack && store.config.alertEmailEnabled) {
+          store.emailSentForCurrentAttack = true;
+          sendAttackReportEmail(store.config, store.externalAttackData, store.externalAttackData.totalVolleys);
+        }
       } else {
         store.totalProxyForwarded = store.externalAttackData.totalVolleys;
         store.totalProxyBlocked = 0;
+        store.emailSentForCurrentAttack = false; // Reset if protection turns off
+      }
+
+      // If attack just stopped, throw an alert
+      if (status === 'stopped') {
+        store.addAlert({
+          type: 'attack_stopped',
+          message: `✅ External attack on ${target} has stopped`,
+          severity: 'info',
+        });
       }
 
       // Broadcast to SSE clients
@@ -52,18 +73,7 @@ export async function POST(request: NextRequest) {
       });
     }
 
-    if (action === 'stopped') {
-      // dos.cpp reports attack has stopped
-      if (store.externalAttackData) {
-        store.externalAttackData.active = false;
-      }
-      store.addAlert({
-        type: 'attack_stopped',
-        message: `✅ External attack has stopped`,
-        severity: 'info',
-      });
-      return NextResponse.json({ received: true });
-    }
+
 
     return NextResponse.json({ error: 'Unknown action' }, { status: 400 });
   } catch {
