@@ -217,10 +217,20 @@ export default function Dashboard() {
         "Null-routing malicious traffic",
         "ShieldWall engine actively filtering..."
       ];
+      
+      let count = 0;
       const interval = setInterval(() => {
+        if (count >= 4) {
+          setMitigationLogs(prev => [...prev.slice(-15), `[${new Date().toISOString().split('T')[1].slice(0,-1)}] ✅ Mitigation successful. All attack traffic blocked.`]);
+          clearInterval(interval);
+          return;
+        }
+        
         const msg = msgs[Math.floor(Math.random() * msgs.length)];
         setMitigationLogs(prev => [...prev.slice(-15), `[${new Date().toISOString().split('T')[1].slice(0,-1)}] 🛡️ ${msg}`]);
-      }, 1500);
+        count++;
+      }, 800);
+      
       return () => clearInterval(interval);
     } else {
       setMitigationLogs([]);
@@ -550,6 +560,10 @@ export default function Dashboard() {
                 <button
                   className={protectionEnabled ? 'btn-danger' : 'btn-primary'}
                   onClick={async () => {
+                    if (!protectionEnabled && !protectedDomain.trim()) {
+                      alert('Please enter a Protected Website URL to enable protection.');
+                      return;
+                    }
                     setLoading(true);
                     const newState = !protectionEnabled;
                     localStorage.setItem('shieldwall_protect_active', newState ? 'true' : 'false');
@@ -563,8 +577,8 @@ export default function Dashboard() {
                     setProtectionEnabled(data.protectionEnabled);
                     setLoading(false);
                   }}
-                  disabled={loading}
-                  style={{ fontSize: 14, padding: '12px 32px', minWidth: 180 }}
+                  disabled={loading || (!protectionEnabled && !protectedDomain.trim())}
+                  style={{ fontSize: 14, padding: '12px 32px', minWidth: 180, opacity: (!protectionEnabled && !protectedDomain.trim()) ? 0.5 : 1 }}
                 >
                   {loading ? '⏳ ...' : protectionEnabled ? '⏹ Disable Protection' : '🛡️ Enable Protection'}
                 </button>
@@ -663,14 +677,14 @@ export default function Dashboard() {
               </>
             )}
 
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: 14 }}>
-              <StatCard icon="🎯" label="Target" value={protectedDomain || (attackData ? `${attackData.target}:${attackData.port}` : 'None')} color="#ef4444" />
-              <StatCard icon="⚡" label="Volleys Sent" value={attackData?.active ? String(attackData.totalVolleys) : "0"} color="#f59e0b" />
-              <StatCard icon="🔗" label="Connections" value={attackData?.active ? String(attackData.totalConnections) : "0"} color="#00d4ff" />
-              <StatCard icon="❌" label="Failed" value={attackData?.active ? String(attackData.totalFailed) : "0"} color="#ef4444" />
-              <StatCard icon={protectionEnabled ? '🛡️' : '⚠️'} label={protectionEnabled ? 'Blocked' : 'Unblocked'} value={attackData?.active ? (protectionEnabled ? String(attackData.totalVolleys) : '0') : "0"} color={protectionEnabled ? '#10b981' : '#ef4444'} />
-              <StatCard icon="🌐" label="Attacker IP" value={attackData?.active ? attackData.attackerIP : "—"} color="#8b5cf6" />
-            </div>
+            {/* Only show attack stats if an attack is actively detected */}
+            {(attackData && attackData.active) && (
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: 14 }}>
+                <StatCard icon="🔗" label="Connections" value={String(attackData.totalConnections)} color="#00d4ff" />
+                <StatCard icon="❌" label="Failed" value={String(attackData.totalFailed)} color="#ef4444" />
+                <StatCard icon={protectionEnabled ? '🛡️' : '⚠️'} label={protectionEnabled ? 'Blocked' : 'Unblocked'} value={protectionEnabled ? String(attackData.totalVolleys) : '0'} color={protectionEnabled ? '#10b981' : '#ef4444'} />
+              </div>
+            )}
 
             {protectionEnabled && attackData?.active && (
               <div style={{ marginTop: 20, background: '#0a0a0a', border: '1px solid #333', borderRadius: 8, padding: 12, fontFamily: 'monospace', fontSize: 12, color: '#10b981', height: 160, overflowY: 'auto', display: 'flex', flexDirection: 'column-reverse' }}>
