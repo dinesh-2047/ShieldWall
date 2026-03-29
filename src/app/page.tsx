@@ -114,7 +114,6 @@ export default function Dashboard() {
 
       // Client-side state restoration for Vercel serverless cold starts
       const wantMonitor = localStorage.getItem('shieldwall_monitor_active') === 'true';
-      const wantProtect = localStorage.getItem('shieldwall_protect_active') === 'true';
       const savedHost = localStorage.getItem('shieldwall_monitor_url');
 
       if (wantMonitor && !mon.monitoring && savedHost) {
@@ -127,13 +126,7 @@ export default function Dashboard() {
         setMonitoring(mon.monitoring);
       }
 
-      if (wantProtect && !fw.protectionEnabled) {
-        console.log('Restoring Protection state...');
-        fetch('/api/firewall', { method: 'POST', body: JSON.stringify({ action: 'toggleProtection', enabled: true }) });
-        setProtectionEnabled(true);
-      } else {
-        setProtectionEnabled(fw.protectionEnabled || false);
-      }
+      setProtectionEnabled(fw.protectionEnabled || false);
 
       setProbes(mon.healthProbes || []);
       setHealthStats(mon.healthStats || { avgResponseTime: 0, availability: 100, currentStatus: 'unknown' });
