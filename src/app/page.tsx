@@ -191,10 +191,7 @@ export default function Dashboard() {
       setTimeout(() => fetchState(), 3000);
     };
 
-    // Poll every 5s as backup
-    const poll = setInterval(fetchState, 5000);
-
-    return () => { es.close(); clearInterval(poll); };
+    return () => { es.close(); };
   }, [fetchState]);
 
   // Animated mitigation logs
