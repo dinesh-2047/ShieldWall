@@ -7,6 +7,7 @@ import { store } from './store';
 
 let lastEmailTime = 0;
 const EMAIL_COOLDOWN = 60000; // 1 minute between emails
+let lastHealthStatus: 'unknown' | 'online' | 'down' = 'unknown';
 
 export async function sendAlertEmail(subject: string, htmlContent: string): Promise<boolean> {
   const config = store.config;
@@ -58,14 +59,32 @@ export function checkAndSendAlerts() {
   if (!store.config.alertEmailEnabled || !store.config.alertEmail) return;
   
   const stats = store.getHealthStats();
-  
-  if (stats.currentStatus === 'down') {
-    sendAlertEmail(
-      `${store.targetUrl} is DOWN!`,
-      `<p style="color:#ef4444;font-size:18px;">Your monitored website is not responding.</p>
-       <p>Response time: ${stats.avgResponseTime}ms</p>
-       <p>Availability: ${stats.availability}%</p>`
-    );
+  const currentStatus = stats.currentStatus as 'unknown' | 'online' | 'down';
+
+  if (currentStatus === 'down') {
+    if (lastHealthStatus !== 'down') {
+      sendAlertEmail(
+        `${store.targetUrl} is DOWN!`,
+        `<p style="color:#ef4444;font-size:18px;">Your monitored website is not responding.</p>
+         <p>Response time: ${stats.avgResponseTime}ms</p>
+         <p>Availability: ${stats.availability}%</p>`
+      );
+    }
+  } else if (currentStatus === 'online') {
+    if (lastHealthStatus === 'down') {
+      sendAlertEmail(
+        `${store.targetUrl} is LIVE again`,
+        `<p style="color:#22c55e;font-size:18px;">Good news: your website is back online.</p>
+         <p>Current response time: ${stats.avgResponseTime}ms</p>
+         <p>Availability: ${stats.availability}%</p>`
+      );
+    } else if (stats.avgResponseTime > 3000) {
+      sendAlertEmail(
+        `High Latency on ${store.targetUrl}`,
+        `<p style="color:#f59e0b;">Average response time: <strong>${stats.avgResponseTime}ms</strong></p>
+         <p>This could indicate a DDoS attack in progress.</p>`
+      );
+    }
   } else if (stats.avgResponseTime > 3000) {
     sendAlertEmail(
       `High Latency on ${store.targetUrl}`,
@@ -73,4 +92,6 @@ export function checkAndSendAlerts() {
        <p>This could indicate a DDoS attack in progress.</p>`
     );
   }
+
+  lastHealthStatus = currentStatus;
 }
