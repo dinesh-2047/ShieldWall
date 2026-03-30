@@ -5,6 +5,7 @@
  */
 
 import { store } from './store';
+import { checkAndSendAlerts } from './alertService';
 
 let monitorInterval: ReturnType<typeof setInterval> | null = null;
 
@@ -66,6 +67,9 @@ async function probeWebsite(url: string) {
       statusCode: response.status,
       available: response.status < 500,
     });
+
+    // Run alert evaluation on each probe so downtime emails work without proxy mode.
+    checkAndSendAlerts();
   } catch (err: unknown) {
     const responseTime = Date.now() - start;
     const errorMessage = err instanceof Error ? err.message : 'Unknown error';
@@ -77,6 +81,9 @@ async function probeWebsite(url: string) {
       available: false,
       error: errorMessage.includes('abort') ? 'Timeout (8s)' : errorMessage,
     });
+
+    // Evaluate alerts on failed probes as well.
+    checkAndSendAlerts();
   }
 }
 
