@@ -102,10 +102,10 @@ export default function Dashboard() {
   const fetchState = useCallback(async () => {
     try {
       const [monRes, fwRes, alertRes, atkRes] = await Promise.all([
-        fetch('/api/monitor'),
-        fetch('/api/firewall'),
-        fetch('/api/alerts'),
-        fetch('/api/attack-data'),
+        fetch('/api/monitor', { cache: 'no-store' }),
+        fetch('/api/firewall', { cache: 'no-store' }),
+        fetch('/api/alerts', { cache: 'no-store' }),
+        fetch('/api/attack-data', { cache: 'no-store' }),
       ]);
       const mon = await monRes.json();
       const fw = await fwRes.json();

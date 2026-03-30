@@ -8,13 +8,15 @@ import { store } from './store';
 import { checkAndSendAlerts } from './alertService';
 
 let monitorInterval: ReturnType<typeof setInterval> | null = null;
+let probeInFlight = false;
 
-export function startMonitoring(url: string) {
+export async function startMonitoring(url: string) {
   stopMonitoring();
 
   // Normalize URL
   if (!url.startsWith('http://') && !url.startsWith('https://')) {
-    url = 'http://' + url;
+    // Prefer HTTPS when protocol is not provided.
+    url = 'https://' + url;
   }
 
   store.targetUrl = url;
@@ -25,11 +27,16 @@ export function startMonitoring(url: string) {
 
   // Probe every 1.5 seconds
   monitorInterval = setInterval(async () => {
+    if (probeInFlight || !store.monitoring) return;
+    probeInFlight = true;
     await probeWebsite(url);
+    probeInFlight = false;
   }, 1500);
 
-  // First probe immediately
-  probeWebsite(url);
+  // First probe immediately and wait for it so UI has an initial status quickly.
+  probeInFlight = true;
+  await probeWebsite(url);
+  probeInFlight = false;
 }
 
 export function stopMonitoring() {
@@ -37,6 +44,7 @@ export function stopMonitoring() {
     clearInterval(monitorInterval);
     monitorInterval = null;
   }
+  probeInFlight = false;
   store.monitoring = false;
   console.log('[Monitor] Stopped monitoring.');
 }

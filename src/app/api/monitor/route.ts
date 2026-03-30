@@ -6,13 +6,25 @@ import { NextRequest, NextResponse } from 'next/server';
 import { store } from '@/lib/store';
 import { startMonitoring, stopMonitoring } from '@/lib/websiteMonitor';
 
+export const dynamic = 'force-dynamic';
+export const revalidate = 0;
+
 export async function GET() {
-  return NextResponse.json({
-    targetUrl: store.targetUrl,
-    monitoring: store.monitoring,
-    healthStats: store.getHealthStats(),
-    healthProbes: store.getRecentProbes(120),
-  });
+  return NextResponse.json(
+    {
+      targetUrl: store.targetUrl,
+      monitoring: store.monitoring,
+      healthStats: store.getHealthStats(),
+      healthProbes: store.getRecentProbes(120),
+    },
+    {
+      headers: {
+        'Cache-Control': 'no-store, no-cache, must-revalidate, proxy-revalidate',
+        Pragma: 'no-cache',
+        Expires: '0',
+      },
+    }
+  );
 }
 
 export async function POST(request: NextRequest) {
@@ -23,7 +35,7 @@ export async function POST(request: NextRequest) {
     switch (action) {
       case 'start': {
         if (!url) return NextResponse.json({ error: 'URL is required' }, { status: 400 });
-        startMonitoring(url);
+        await startMonitoring(url);
         return NextResponse.json({ success: true, monitoring: true, targetUrl: store.targetUrl });
       }
       case 'stop': {
