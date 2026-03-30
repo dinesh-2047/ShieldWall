@@ -384,7 +384,7 @@ export default function Dashboard() {
         {([
           { key: 'monitor', icon: '📡', label: 'Monitor' },
           { key: 'protect', icon: '🛡️', label: 'Protect' },
-          { key: 'attack', icon: '⚡', label: 'Attack' },
+          // { key: 'attack', icon: '⚡', label: 'Attack' },
           { key: 'alerts', icon: '🔔', label: 'Alerts' },
           { key: 'settings', icon: '⚙️', label: 'Settings' },
         ] as const).map(tab => (
@@ -518,15 +518,15 @@ export default function Dashboard() {
                 <h3 style={{ fontSize: 20, fontWeight: 800, marginBottom: 6 }}>🛡️ ShieldWall Firewall</h3>
                 <p style={{ fontSize: 13, color: 'var(--text-secondary)' }}>
                   {protectionEnabled
-                    ? 'Firewall is ACTIVE — dos.cpp attack tool will detect this and auto-stop attacks.'
-                    : 'Firewall is OFF — the target website is unprotected from attacks.'}
+                    ? 'Firewall is ACTIVE  '
+                    : 'Firewall is OFF '}
                 </p>
                 <div style={{ marginTop: 16 }}>
                   <label style={{ fontSize: 12, color: 'var(--text-secondary)', display: 'block', marginBottom: 4 }}>Protected Website URL (Target Simulation)</label>
                   <input 
                     className="input-field" 
                     style={{ maxWidth: 300, background: 'rgba(0,0,0,0.2)', border: '1px solid rgba(255,255,255,0.1)' }}
-                    placeholder="e.g. hackathon-project.com" 
+                    placeholder="e.g. domainname.com" 
                     value={protectedDomain} 
                     onChange={e => setProtectedDomain(e.target.value)} 
                   />
@@ -576,19 +576,7 @@ export default function Dashboard() {
             </div>
           </div>
 
-          {/* How it works */}
-          <div className="glass-card" style={{ padding: 24, marginBottom: 20, borderLeft: '4px solid #00d4ff' }}>
-            <h3 style={{ fontSize: 16, fontWeight: 700, marginBottom: 10 }}>💡 How It Works</h3>
-            <p style={{ fontSize: 13, color: 'var(--text-secondary)', lineHeight: 1.7 }}>
-              When protection is <strong style={{ color: '#10b981' }}>ON</strong>, the <code style={{ color: '#00d4ff', background: 'rgba(0,212,255,0.1)', padding: '2px 6px', borderRadius: 4 }}>dos.cpp</code> attack tool
-              checks this dashboard&apos;s API before attacking. If ShieldWall reports <code style={{ color: '#10b981', background: 'rgba(16,185,129,0.1)', padding: '2px 6px', borderRadius: 4 }}>protectionEnabled: true</code>,
-              the attack is <strong style={{ color: '#ef4444' }}>automatically blocked</strong>.
-              A background monitor re-checks every 3 seconds — if you enable protection mid-attack, the attack auto-stops.
-            </p>
-            <div style={{ marginTop: 12, padding: '10px 16px', background: 'rgba(0,212,255,0.06)', borderRadius: 8, fontSize: 12, color: 'var(--text-secondary)' }}>
-              <strong>Flow:</strong> Attacker (Cloud Console) → <span style={{ color: '#ef4444' }}>dos.cpp checks ShieldWall API</span> → {protectionEnabled ? <span style={{ color: '#10b981' }}>⛔ ATTACK BLOCKED</span> : <span style={{ color: '#ef4444' }}>✅ Attack proceeds (no protection)</span>}
-            </div>
-          </div>
+    
 
           {/* Live Data */}
           <div className="glass-card" style={{ padding: 24, marginBottom: 20 }}>
@@ -703,57 +691,7 @@ export default function Dashboard() {
         </div>
       )}
 
-      {/* ======== ATTACK TAB (Password Protected) ======== */}
-      {activeTab === 'attack' && (
-        <div className="fade-in">
-          {!attackUnlocked ? (
-            <div className="glass-card" style={{ padding: 40, textAlign: 'center', maxWidth: 400, margin: '0 auto', marginTop: 40 }}>
-              <h3 style={{ fontSize: 20, fontWeight: 800, marginBottom: 16 }}>🔒 Locked</h3>
-              <p style={{ fontSize: 13, color: 'var(--text-secondary)', marginBottom: 20 }}>
-                Enter the console password to access the attack platform.
-              </p>
-              <form onSubmit={async (e) => {
-                e.preventDefault();
-                setLoading(true);
-                const res = await fetch('/api/auth', { method: 'POST', body: JSON.stringify({ password: attackPassword }) });
-                const ok = await res.json();
-                if (ok.success) {
-                  setAttackUnlocked(true);
-                  setStatusMsg('🔓 Unlocked');
-                } else {
-                  setStatusMsg('❌ Incorrect password');
-                }
-                setLoading(false);
-                setTimeout(() => setStatusMsg(''), 3000);
-              }}>
-                <input type="password" placeholder="Password..." className="input-field" style={{ marginBottom: 16, textAlign: 'center' }}
-                  value={attackPassword} onChange={e => setAttackPassword(e.target.value)} />
-                <button type="submit" className="btn-primary" disabled={loading} style={{ width: '100%' }}>
-                  {loading ? '...' : 'Unlock'}
-                </button>
-              </form>
-            </div>
-          ) : (
-            <div className="glass-card" style={{ padding: 0, height: '70vh', overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
-              <div style={{ padding: '16px 24px', background: 'rgba(0,0,0,0.5)', borderBottom: '1px solid rgba(255,255,255,0.05)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                <h3 style={{ fontSize: 16, fontWeight: 700, margin: 0 }}>⚡ Google Cloud Shell</h3>
-                <a href="https://console.cloud.google.com/cloudshell/editor" target="_blank" rel="noreferrer" className="btn-secondary" style={{ padding: '6px 16px', fontSize: 12, textDecoration: 'none' }}>
-                  Open in New Tab ↗
-                </a>
-              </div>
-              <p style={{ padding: '12px 24px', margin: 0, fontSize: 12, color: '#f59e0b', background: 'rgba(245,158,11,0.1)' }}>
-                <strong>Note:</strong> Due to security restrictions, you may need to open Cloud Shell in a new tab if the embedded view refuses to connect.
-              </p>
-              <iframe
-                src="https://console.cloud.google.com/cloudshell/editor"
-                style={{ width: '100%', flex: 1, border: 'none', background: '#000' }}
-                title="Google Cloud Console"
-                sandbox="allow-same-origin allow-scripts allow-popups allow-forms"
-              />
-            </div>
-          )}
-        </div>
-      )}
+     
 
       {/* ======== ALERTS TAB ======== */}
       {activeTab === 'alerts' && (
