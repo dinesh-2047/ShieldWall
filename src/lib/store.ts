@@ -190,10 +190,12 @@ class FirewallStore {
       : 0;
     const availability = Math.round((available.length / recent.length) * 100);
     const last = recent[recent.length - 1];
+    const staleMs = Date.now() - last.timestamp;
+    const isStaleWhileMonitoring = this.monitoring && staleMs > 12000;
     return {
       avgResponseTime,
       availability,
-      currentStatus: last.available ? 'online' : 'down',
+      currentStatus: isStaleWhileMonitoring ? 'down' : (last.available ? 'online' : 'down'),
       lastProbe: last,
     };
   }

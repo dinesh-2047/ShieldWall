@@ -143,55 +143,87 @@ export default function Dashboard() {
 
   // ---- SSE for real-time updates ----
   useEffect(() => {
-    fetchState();
+    let es: EventSource | null = null;
+    let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+    let pollTimer: ReturnType<typeof setInterval> | null = null;
+    let disposed = false;
 
-    const es = new EventSource('/api/monitor/stream');
+    const connectSSE = () => {
+      if (disposed) return;
 
-    es.addEventListener('init', (event: MessageEvent) => {
-      try {
-        const data: FullState = JSON.parse(event.data);
-        if (data.targetUrl) setTargetUrl(data.targetUrl);
-        setMonitoring(data.monitoring);
-        setProbes(data.healthProbes || []);
-        setHealthStats(data.healthStats);
-        setBlockedIPs(data.blockedIPs || []);
-        setProtectionEnabled(data.protectionEnabled || false);
-        setAlerts(data.alerts || []);
-        if (data.externalAttackData) setAttackData(data.externalAttackData);
-        setConfig(data.config);
-      } catch { /* ignore */ }
-    });
+      es = new EventSource('/api/monitor/stream');
 
-    es.addEventListener('health', (event: MessageEvent) => {
-      try {
-        const probe: HealthProbe = JSON.parse(event.data);
-        setProbes(prev => [...prev.slice(-300), probe]);
-        // Update stats locally
-        setHealthStats(prev => ({
-          ...prev,
-          currentStatus: probe.available ? 'online' : 'down',
-          avgResponseTime: probe.available ? Math.round((prev.avgResponseTime * 0.8) + (probe.responseTime * 0.2)) : prev.avgResponseTime,
-        }));
-      } catch { /* ignore */ }
-    });
+      es.addEventListener('init', (event: MessageEvent) => {
+        try {
+          const data: FullState = JSON.parse(event.data);
+          if (data.targetUrl) setTargetUrl(data.targetUrl);
+          setMonitoring(data.monitoring);
+          setProbes(data.healthProbes || []);
+          setHealthStats(data.healthStats);
+          setBlockedIPs(data.blockedIPs || []);
+          setProtectionEnabled(data.protectionEnabled || false);
+          setAlerts(data.alerts || []);
+          if (data.externalAttackData) setAttackData(data.externalAttackData);
+          setConfig(data.config);
+        } catch { /* ignore */ }
+      });
 
-    es.addEventListener('alert', (event: MessageEvent) => {
-      try {
-        const alert: AlertEntry = JSON.parse(event.data);
-        setAlerts(prev => [alert, ...prev.slice(0, 49)]);
-      } catch { /* ignore */ }
-    });
+      es.addEventListener('health', (event: MessageEvent) => {
+        try {
+          const probe: HealthProbe = JSON.parse(event.data);
+          setProbes(prev => [...prev.slice(-300), probe]);
+          // Update stats locally
+          setHealthStats(prev => ({
+            ...prev,
+            currentStatus: probe.available ? 'online' : 'down',
+            avgResponseTime: probe.available ? Math.round((prev.avgResponseTime * 0.8) + (probe.responseTime * 0.2)) : prev.avgResponseTime,
+          }));
+        } catch { /* ignore */ }
+      });
 
-    es.addEventListener('blocked', () => {
-      fetchState(); // Refresh blocked IPs
-    });
+      es.addEventListener('alert', (event: MessageEvent) => {
+        try {
+          const alert: AlertEntry = JSON.parse(event.data);
+          setAlerts(prev => [alert, ...prev.slice(0, 49)]);
+        } catch { /* ignore */ }
+      });
 
-    es.onerror = () => {
-      es.close();
-      setTimeout(() => fetchState(), 3000);
+      es.addEventListener('blocked', () => {
+        fetchState(); // Refresh blocked IPs
+      });
+
+      es.onerror = () => {
+        if (es) {
+          es.close();
+          es = null;
+        }
+
+        if (!disposed && !reconnectTimer) {
+          reconnectTimer = setTimeout(() => {
+            reconnectTimer = null;
+            fetchState();
+            connectSSE();
+          }, 3000);
+        }
+      };
     };
 
-    return () => { es.close(); };
+    fetchState();
+    connectSSE();
+
+    // Fallback polling keeps UI fresh if streaming disconnects intermittently.
+    pollTimer = setInterval(() => {
+      if (!es || es.readyState === EventSource.CLOSED) {
+        fetchState();
+      }
+    }, 5000);
+
+    return () => {
+      disposed = true;
+      if (es) es.close();
+      if (reconnectTimer) clearTimeout(reconnectTimer);
+      if (pollTimer) clearInterval(pollTimer);
+    };
   }, [fetchState]);
 
   // Animated mitigation logs

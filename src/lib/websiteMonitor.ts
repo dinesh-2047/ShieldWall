@@ -10,6 +10,16 @@ import { checkAndSendAlerts } from './alertService';
 let monitorInterval: ReturnType<typeof setInterval> | null = null;
 let probeInFlight = false;
 
+async function runProbe(url: string) {
+  if (probeInFlight || !store.monitoring) return;
+  probeInFlight = true;
+  try {
+    await probeWebsite(url);
+  } finally {
+    probeInFlight = false;
+  }
+}
+
 export async function startMonitoring(url: string) {
   stopMonitoring();
 
@@ -26,17 +36,12 @@ export async function startMonitoring(url: string) {
   console.log(`[Monitor] Starting health monitoring for ${url}`);
 
   // Probe every 1.5 seconds
-  monitorInterval = setInterval(async () => {
-    if (probeInFlight || !store.monitoring) return;
-    probeInFlight = true;
-    await probeWebsite(url);
-    probeInFlight = false;
+  monitorInterval = setInterval(() => {
+    void runProbe(url);
   }, 1500);
 
   // First probe immediately and wait for it so UI has an initial status quickly.
-  probeInFlight = true;
-  await probeWebsite(url);
-  probeInFlight = false;
+  await runProbe(url);
 }
 
 export function stopMonitoring() {
@@ -51,10 +56,11 @@ export function stopMonitoring() {
 
 async function probeWebsite(url: string) {
   const start = Date.now();
+  let timeout: ReturnType<typeof setTimeout> | null = null;
 
   try {
     const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 8000); // 8s timeout
+    timeout = setTimeout(() => controller.abort(), 8000); // 8s timeout
 
     const response = await fetch(url, {
       method: 'GET',
@@ -66,7 +72,6 @@ async function probeWebsite(url: string) {
       redirect: 'follow',
     });
 
-    clearTimeout(timeout);
     const responseTime = Date.now() - start;
 
     store.addHealthProbe({
@@ -92,6 +97,8 @@ async function probeWebsite(url: string) {
 
     // Evaluate alerts on failed probes as well.
     checkAndSendAlerts();
+  } finally {
+    if (timeout) clearTimeout(timeout);
   }
 }
 
