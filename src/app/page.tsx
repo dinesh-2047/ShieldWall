@@ -73,6 +73,28 @@ interface FullState {
   };
 }
 
+const EMAIL_SETTINGS_STORAGE_KEY = 'shieldwall_email_settings';
+
+function loadStoredEmailSettings(): Partial<FullState['config']> {
+  try {
+    const raw = localStorage.getItem(EMAIL_SETTINGS_STORAGE_KEY);
+    if (!raw) return {};
+
+    const parsed = JSON.parse(raw) as Partial<FullState['config']>;
+    return {
+      alertEmailEnabled: !!parsed.alertEmailEnabled,
+      alertEmail: typeof parsed.alertEmail === 'string' ? parsed.alertEmail : '',
+      alertTrafficThreshold: typeof parsed.alertTrafficThreshold === 'number' ? parsed.alertTrafficThreshold : 100,
+      smtpHost: typeof parsed.smtpHost === 'string' ? parsed.smtpHost : 'smtp.gmail.com',
+      smtpPort: typeof parsed.smtpPort === 'number' ? parsed.smtpPort : 587,
+      smtpUser: typeof parsed.smtpUser === 'string' ? parsed.smtpUser : '',
+      smtpPass: typeof parsed.smtpPass === 'string' ? parsed.smtpPass : '',
+    };
+  } catch {
+    return {};
+  }
+}
+
 // ==========================================
 // Dashboard
 // ==========================================
@@ -131,7 +153,10 @@ export default function Dashboard() {
       setProbes(mon.healthProbes || []);
       setHealthStats(mon.healthStats || { avgResponseTime: 0, availability: 100, currentStatus: 'unknown' });
       setBlockedIPs(fw.blockedIPs || []);
-      setConfig(fw.config);
+      if (fw.config) {
+        const localEmailConfig = loadStoredEmailSettings();
+        setConfig({ ...fw.config, ...localEmailConfig });
+      }
       setAlerts(al.alerts || []);
       setProxyForwarded(fw.totalForwarded || 0);
       setProxyBlocked(fw.totalBlocked || 0);
@@ -164,7 +189,8 @@ export default function Dashboard() {
           setProtectionEnabled(data.protectionEnabled || false);
           setAlerts(data.alerts || []);
           if (data.externalAttackData) setAttackData(data.externalAttackData);
-          setConfig(data.config);
+          const localEmailConfig = loadStoredEmailSettings();
+          setConfig({ ...data.config, ...localEmailConfig });
         } catch { /* ignore */ }
       });
 
@@ -225,6 +251,29 @@ export default function Dashboard() {
       if (pollTimer) clearInterval(pollTimer);
     };
   }, [fetchState]);
+
+  useEffect(() => {
+    if (!config) return;
+
+    localStorage.setItem(EMAIL_SETTINGS_STORAGE_KEY, JSON.stringify({
+      alertEmailEnabled: config.alertEmailEnabled,
+      alertEmail: config.alertEmail,
+      alertTrafficThreshold: config.alertTrafficThreshold,
+      smtpHost: config.smtpHost,
+      smtpPort: config.smtpPort,
+      smtpUser: config.smtpUser,
+      smtpPass: config.smtpPass,
+    }));
+  }, [
+    config?.alertEmailEnabled,
+    config?.alertEmail,
+    config?.alertTrafficThreshold,
+    config?.smtpHost,
+    config?.smtpPort,
+    config?.smtpUser,
+    config?.smtpPass,
+    config,
+  ]);
 
   // Animated mitigation logs
   useEffect(() => {
