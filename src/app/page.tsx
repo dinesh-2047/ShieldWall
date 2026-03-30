@@ -722,15 +722,7 @@ export default function Dashboard() {
       {activeTab === 'settings' && config && (
         <div className="fade-in">
           <form onSubmit={saveSettings}>
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(420px, 1fr))', gap: 20 }}>
-              <div className="glass-card" style={{ padding: 24 }}>
-                <h3 style={{ fontSize: 16, fontWeight: 700, marginBottom: 16 }}>🛡️ Rate Limiting</h3>
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
-                  <InputField label="Max requests/sec per IP" type="number" value={config.rateLimit} onChange={v => setConfig({ ...config, rateLimit: parseInt(v) || 50 })} />
-                  <InputField label="Window (seconds)" type="number" value={config.rateLimitWindow} onChange={v => setConfig({ ...config, rateLimitWindow: parseInt(v) || 10 })} />
-                  <InputField label="Auto-block after N violations" type="number" value={config.autoBlockThreshold} onChange={v => setConfig({ ...config, autoBlockThreshold: parseInt(v) || 5 })} />
-                </div>
-              </div>
+            <div style={{ display: 'grid', gridTemplateColumns: 'minmax(420px, 700px)', gap: 20 }}>
               <div className="glass-card" style={{ padding: 24 }}>
                 <h3 style={{ fontSize: 16, fontWeight: 700, marginBottom: 16 }}>📧 Email Alerts</h3>
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
