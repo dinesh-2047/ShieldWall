@@ -5,11 +5,14 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { store } from '@/lib/store';
 import { startMonitoring, stopMonitoring } from '@/lib/websiteMonitor';
+import { hydrateStoreFromDurableState, persistStoreToDurableState } from '@/lib/durableState';
 
 export const dynamic = 'force-dynamic';
 export const revalidate = 0;
 
 export async function GET() {
+  await hydrateStoreFromDurableState();
+
   return NextResponse.json(
     {
       targetUrl: store.targetUrl,
@@ -29,6 +32,8 @@ export async function GET() {
 
 export async function POST(request: NextRequest) {
   try {
+    await hydrateStoreFromDurableState();
+
     const body = await request.json();
     const { action, url } = body;
 
@@ -36,10 +41,12 @@ export async function POST(request: NextRequest) {
       case 'start': {
         if (!url) return NextResponse.json({ error: 'URL is required' }, { status: 400 });
         await startMonitoring(url);
+        await persistStoreToDurableState();
         return NextResponse.json({ success: true, monitoring: true, targetUrl: store.targetUrl });
       }
       case 'stop': {
         stopMonitoring();
+        await persistStoreToDurableState();
         return NextResponse.json({ success: true, monitoring: false });
       }
       default:
