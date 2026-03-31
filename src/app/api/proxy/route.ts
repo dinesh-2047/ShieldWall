@@ -5,11 +5,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { startProxyServer, stopProxyServer, isProxyRunning } from '@/lib/proxyServer';
 import { store } from '@/lib/store';
-import { hydrateStoreFromDurableState, persistStoreToDurableState } from '@/lib/durableState';
 
 export async function GET() {
-  await hydrateStoreFromDurableState();
-
   return NextResponse.json({
     running: isProxyRunning(),
     port: store.proxyPort,
@@ -23,8 +20,6 @@ export async function GET() {
 
 export async function POST(request: NextRequest) {
   try {
-    await hydrateStoreFromDurableState();
-
     const body = await request.json();
     const { action, targetUrl, port } = body;
 
@@ -35,12 +30,10 @@ export async function POST(request: NextRequest) {
         }
         const listenPort = port || 80;
         const result = startProxyServer(targetUrl, listenPort);
-        await persistStoreToDurableState();
         return NextResponse.json({ ...result, port: listenPort, running: isProxyRunning() });
       }
       case 'stop': {
         const result = stopProxyServer();
-        await persistStoreToDurableState();
         return NextResponse.json({ ...result, running: isProxyRunning() });
       }
       default:
