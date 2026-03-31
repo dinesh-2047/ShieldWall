@@ -3,13 +3,10 @@
  */
 
 import { store } from '@/lib/store';
-import { hydrateStoreFromDurableState } from '@/lib/durableState';
 
 export const dynamic = 'force-dynamic';
 
 export async function GET() {
-  await hydrateStoreFromDurableState();
-
   const stream = new ReadableStream({
     start(controller) {
       store.addSSEClient(controller);

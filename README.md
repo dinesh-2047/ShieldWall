@@ -37,25 +37,6 @@ Create `firewall-dashboard/.env.local`:
 PY_ENGINE_URL=http://127.0.0.1:5050
 ```
 
-### 2.1) Configure durable state (required for deployed Vercel stability)
-
-Without durable state, serverless instances reset in-memory flags like `protectionEnabled`.
-Set one of these environment variable pairs in Vercel project settings:
-
-```bash
-UPSTASH_REDIS_REST_URL=...
-UPSTASH_REDIS_REST_TOKEN=...
-```
-
-or
-
-```bash
-KV_REST_API_URL=...
-KV_REST_API_TOKEN=...
-```
-
-If neither pair is set, ShieldWall falls back to per-instance memory (good for local dev, not reliable for multi-instance deploys).
-
 ### 3) Start dashboard
 
 ```bash
