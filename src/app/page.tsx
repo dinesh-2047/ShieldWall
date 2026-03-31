@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import {
   AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip,
   ResponsiveContainer, Legend,
@@ -119,6 +119,7 @@ export default function Dashboard() {
   const [proxyForwarded, setProxyForwarded] = useState(0);
   const [proxyBlocked, setProxyBlocked] = useState(0);
   const [attackData, setAttackData] = useState<ExternalAttackData | null>(null);
+  const terminalWindowRef = useRef<Window | null>(null);
 
   // ---- Fetch full state ----
   const fetchState = useCallback(async () => {
@@ -129,7 +130,7 @@ export default function Dashboard() {
         fetch('/api/alerts', { cache: 'no-store' }),
         fetch('/api/attack-data', { cache: 'no-store' }),
       ]);
-      const mon = await monRes.json();
+      let mon = await monRes.json();
       const fw = await fwRes.json();
       const al = await alertRes.json();
       const atk = await atkRes.json();
@@ -137,16 +138,32 @@ export default function Dashboard() {
       // Client-side state restoration for Vercel serverless cold starts
       const wantMonitor = localStorage.getItem('shieldwall_monitor_active') === 'true';
       const savedHost = localStorage.getItem('shieldwall_monitor_url');
+      const latestProbe = Array.isArray(mon.healthProbes) && mon.healthProbes.length > 0
+        ? mon.healthProbes[mon.healthProbes.length - 1]
+        : null;
+      const probeStale = !latestProbe || (Date.now() - latestProbe.timestamp > 12000);
 
-      if (wantMonitor && !mon.monitoring && savedHost) {
+      if (wantMonitor && savedHost && (!mon.monitoring || probeStale)) {
         console.log('Restoring Monitor state...');
-        fetch('/api/monitor', { method: 'POST', body: JSON.stringify({ action: 'start', url: savedHost }) });
-        setMonitoring(true);
-        setTargetUrl(savedHost);
-      } else {
-        if (mon.targetUrl) setTargetUrl(mon.targetUrl);
-        setMonitoring(mon.monitoring);
+        const startRes = await fetch('/api/monitor', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ action: 'start', url: savedHost }),
+        });
+
+        if (startRes.ok) {
+          // Re-read monitor state immediately to get first probe/status.
+          const freshMonRes = await fetch('/api/monitor', { cache: 'no-store' });
+          mon = await freshMonRes.json();
+          setStatusMsg('✅ Monitoring restored');
+        } else {
+          localStorage.setItem('shieldwall_monitor_active', 'false');
+          setStatusMsg('❌ Failed to restore monitoring');
+        }
       }
+
+      if (mon.targetUrl) setTargetUrl(mon.targetUrl);
+      setMonitoring(!!mon.monitoring);
 
       setProtectionEnabled(fw.protectionEnabled || false);
 
@@ -322,10 +339,15 @@ export default function Dashboard() {
       body: JSON.stringify({ action: 'start', url: targetUrl.trim() }),
     });
     const data = await res.json();
-    setMonitoring(data.monitoring || false);
+    const started = !!data.monitoring;
+    setMonitoring(started);
     if (data.targetUrl) setTargetUrl(data.targetUrl);
+    if (!started) {
+      localStorage.setItem('shieldwall_monitor_active', 'false');
+      setStatusMsg(`❌ ${data.error || 'Failed to start monitoring'}`);
+    }
     setLoading(false);
-    setStatusMsg('✅ Monitoring started!');
+    if (started) setStatusMsg('✅ Monitoring started!');
   };
 
   const stopMonitor = async () => {
@@ -366,23 +388,62 @@ export default function Dashboard() {
     setTimeout(() => setStatusMsg(''), 3000);
   };
 
+  const openMitigationTerminal = useCallback(() => {
+    if (typeof window === 'undefined') return;
+
+    if (terminalWindowRef.current && !terminalWindowRef.current.closed) {
+      terminalWindowRef.current.focus();
+      return;
+    }
+
+    const popup = window.open(
+      '/mitigation-terminal',
+      'shieldwall_mitigation_terminal',
+      'popup=yes,width=560,height=420,left=120,top=120,resizable=yes,scrollbars=yes'
+    );
+
+    if (popup) {
+      terminalWindowRef.current = popup;
+      popup.focus();
+      return;
+    }
+
+    setStatusMsg('⚠️ Popup blocked. Allow popups to open the mitigation terminal window.');
+  }, []);
+
   // ---- Protection toggle ----
   const toggleProtection = async (enable: boolean) => {
     setLoading(true);
+    const requestedTarget = protectedDomain.trim() || targetUrl.trim();
+
     const res = await fetch('/api/firewall', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ action: 'toggleProtection', enabled: enable }),
+      body: JSON.stringify({ action: 'toggleProtection', enabled: enable, targetUrl: requestedTarget }),
     });
     const data = await res.json();
+
     if (data.success) {
       setProtectionEnabled(data.protectionEnabled);
-      setStatusMsg(data.protectionEnabled
-        ? '🛡️ Protection ENABLED — attacks will be blocked!'
-        : '⚠️ Protection DISABLED');
+
+      if (data.protectionEnabled) {
+        openMitigationTerminal();
+        setStatusMsg(
+          data.engine?.mode === 'python'
+            ? '🛡️ Protection ENABLED — Python engine connected. Mitigation terminal opened.'
+            : '🛡️ Protection ENABLED — fallback mode active. Mitigation terminal opened.'
+        );
+      } else {
+        if (terminalWindowRef.current && !terminalWindowRef.current.closed) {
+          terminalWindowRef.current.close();
+        }
+        terminalWindowRef.current = null;
+        setStatusMsg('⚠️ Protection DISABLED');
+      }
     } else {
       setStatusMsg(`❌ ${data.error}`);
     }
+
     setLoading(false);
     setTimeout(() => setStatusMsg(''), 4000);
   };
@@ -635,18 +696,11 @@ export default function Dashboard() {
                       alert('Please enter a Protected Website URL to enable protection.');
                       return;
                     }
-                    setLoading(true);
+
                     const newState = !protectionEnabled;
                     localStorage.setItem('shieldwall_protect_active', newState ? 'true' : 'false');
-                    
-                    const res = await fetch('/api/firewall', {
-                      method: 'POST',
-                      headers: { 'Content-Type': 'application/json' },
-                      body: JSON.stringify({ action: 'toggleProtection', enabled: newState }),
-                    });
-                    const data = await res.json();
-                    setProtectionEnabled(data.protectionEnabled);
-                    setLoading(false);
+
+                    await toggleProtection(newState);
                   }}
                   disabled={loading || (!protectionEnabled && !protectedDomain.trim())}
                   style={{ fontSize: 14, padding: '12px 32px', minWidth: 180, opacity: (!protectionEnabled && !protectedDomain.trim()) ? 0.5 : 1 }}

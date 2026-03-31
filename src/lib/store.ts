@@ -67,6 +67,15 @@ export interface ExternalAttackData {
   lastUpdate: number;
 }
 
+export interface EngineLogEntry {
+  id: string;
+  timestamp: number;
+  source: 'system' | 'proxy' | 'python' | 'fallback';
+  level: 'info' | 'warning' | 'critical';
+  message: string;
+  simulated: boolean;
+}
+
 class FirewallStore {
   // ---- Target website ----
   targetUrl: string = '';
@@ -96,6 +105,10 @@ class FirewallStore {
   // ---- External attack data (from dos.cpp via API) ----
   externalAttackData: ExternalAttackData | null = null;
   emailSentForCurrentAttack: boolean = false;
+
+  // ---- Engine logs (for terminal view + popup) ----
+  engineLogs: EngineLogEntry[] = [];
+  private readonly MAX_ENGINE_LOGS = 300;
 
   // ---- Blocked IPs ----
   blockedIPs: Map<string, BlockedIP> = new Map();
@@ -307,6 +320,33 @@ class FirewallStore {
     return this.alerts.slice(-limit).reverse();
   }
 
+  // ============ Engine logs ============
+  addEngineLog(params: {
+    source: EngineLogEntry['source'];
+    level: EngineLogEntry['level'];
+    message: string;
+    simulated?: boolean;
+  }) {
+    const log: EngineLogEntry = {
+      id: `eng_${Date.now()}_${Math.random().toString(36).substr(2, 6)}`,
+      timestamp: Date.now(),
+      simulated: params.simulated ?? false,
+      ...params,
+    };
+
+    this.engineLogs.push(log);
+    if (this.engineLogs.length > this.MAX_ENGINE_LOGS) {
+      this.engineLogs = this.engineLogs.slice(-this.MAX_ENGINE_LOGS);
+    }
+
+    this.broadcastSSE('engineLog', log);
+    return log;
+  }
+
+  getEngineLogs(limit: number = 120): EngineLogEntry[] {
+    return this.engineLogs.slice(-limit);
+  }
+
   // ============ Full state snapshot ============
   getFullState() {
     return {
@@ -325,6 +365,7 @@ class FirewallStore {
       totalProxyBlocked: this.totalProxyBlocked,
       blockedIPs: this.getBlockedIPs(),
       externalAttackData: this.externalAttackData,
+      engineLogs: this.getEngineLogs(200),
       alerts: this.getAlerts(30),
       config: this.config,
       ipStats: this.getIPStats(),
