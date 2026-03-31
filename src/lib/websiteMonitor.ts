@@ -6,6 +6,7 @@
 
 import { store } from './store';
 import { checkAndSendAlerts } from './alertService';
+import { persistStoreToDurableState } from './durableState';
 
 let monitorInterval: ReturnType<typeof setInterval> | null = null;
 let probeInFlight = false;
@@ -32,6 +33,7 @@ export async function startMonitoring(url: string) {
   store.targetUrl = url;
   store.monitoring = true;
   store.healthProbes = [];
+  void persistStoreToDurableState();
 
   console.log(`[Monitor] Starting health monitoring for ${url}`);
 
@@ -51,6 +53,7 @@ export function stopMonitoring() {
   }
   probeInFlight = false;
   store.monitoring = false;
+  void persistStoreToDurableState();
   console.log('[Monitor] Stopped monitoring.');
 }
 
@@ -83,6 +86,7 @@ async function probeWebsite(url: string) {
 
     // Run alert evaluation on each probe so downtime emails work without proxy mode.
     checkAndSendAlerts();
+    void persistStoreToDurableState();
   } catch (err: unknown) {
     const responseTime = Date.now() - start;
     const errorMessage = err instanceof Error ? err.message : 'Unknown error';
@@ -97,6 +101,7 @@ async function probeWebsite(url: string) {
 
     // Evaluate alerts on failed probes as well.
     checkAndSendAlerts();
+    void persistStoreToDurableState();
   } finally {
     if (timeout) clearTimeout(timeout);
   }

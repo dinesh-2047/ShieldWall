@@ -4,8 +4,11 @@
 
 import { NextRequest, NextResponse } from 'next/server';
 import { store } from '@/lib/store';
+import { hydrateStoreFromDurableState, persistStoreToDurableState } from '@/lib/durableState';
 
 export async function GET() {
+  await hydrateStoreFromDurableState();
+
   return NextResponse.json({
     alerts: store.getAlerts(50),
     emailConfig: {
@@ -18,6 +21,8 @@ export async function GET() {
 
 export async function POST(request: NextRequest) {
   try {
+    await hydrateStoreFromDurableState();
+
     const body = await request.json();
     const { alertEmail, alertEmailEnabled, alertTrafficThreshold, smtpHost, smtpPort, smtpUser, smtpPass } = body;
 
@@ -28,6 +33,8 @@ export async function POST(request: NextRequest) {
     if (smtpPort !== undefined) store.config.smtpPort = smtpPort;
     if (smtpUser !== undefined) store.config.smtpUser = smtpUser;
     if (smtpPass !== undefined) store.config.smtpPass = smtpPass;
+
+    await persistStoreToDurableState();
 
     return NextResponse.json({ success: true, config: store.config });
   } catch {
