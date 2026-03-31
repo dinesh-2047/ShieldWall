@@ -74,6 +74,8 @@ interface FullState {
 }
 
 const EMAIL_SETTINGS_STORAGE_KEY = 'shieldwall_email_settings';
+const PROTECTION_STORAGE_KEY = 'shieldwall_protect_active';
+const PROTECTION_TARGET_STORAGE_KEY = 'shieldwall_protect_target';
 
 function loadStoredEmailSettings(): Partial<FullState['config']> {
   try {
@@ -120,6 +122,8 @@ export default function Dashboard() {
   const [proxyBlocked, setProxyBlocked] = useState(0);
   const [attackData, setAttackData] = useState<ExternalAttackData | null>(null);
   const terminalWindowRef = useRef<Window | null>(null);
+  const protectionRestoreInFlightRef = useRef(false);
+  const lastProtectionRestoreAttemptRef = useRef(0);
 
   // ---- Fetch full state ----
   const fetchState = useCallback(async () => {
@@ -138,6 +142,8 @@ export default function Dashboard() {
       // Client-side state restoration for Vercel serverless cold starts
       const wantMonitor = localStorage.getItem('shieldwall_monitor_active') === 'true';
       const savedHost = localStorage.getItem('shieldwall_monitor_url');
+      const wantProtection = localStorage.getItem(PROTECTION_STORAGE_KEY) === 'true';
+      const savedProtectionTarget = localStorage.getItem(PROTECTION_TARGET_STORAGE_KEY) || '';
       const latestProbe = Array.isArray(mon.healthProbes) && mon.healthProbes.length > 0
         ? mon.healthProbes[mon.healthProbes.length - 1]
         : null;
@@ -163,9 +169,46 @@ export default function Dashboard() {
       }
 
       if (mon.targetUrl) setTargetUrl(mon.targetUrl);
+      if (savedProtectionTarget && !protectedDomain) {
+        setProtectedDomain(savedProtectionTarget);
+      }
+
       setMonitoring(!!mon.monitoring);
 
-      setProtectionEnabled(fw.protectionEnabled || false);
+      let effectiveProtectionEnabled = !!fw.protectionEnabled;
+
+      if (
+        wantProtection &&
+        !effectiveProtectionEnabled &&
+        !protectionRestoreInFlightRef.current &&
+        Date.now() - lastProtectionRestoreAttemptRef.current > 10000
+      ) {
+        const restoreTarget = savedProtectionTarget || mon.targetUrl || savedHost || targetUrl;
+
+        if (restoreTarget) {
+          protectionRestoreInFlightRef.current = true;
+          lastProtectionRestoreAttemptRef.current = Date.now();
+
+          try {
+            const restoreRes = await fetch('/api/firewall', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ action: 'toggleProtection', enabled: true, targetUrl: restoreTarget }),
+            });
+
+            const restoreData = await restoreRes.json();
+            if (restoreData.success && restoreData.protectionEnabled) {
+              effectiveProtectionEnabled = true;
+            }
+          } catch {
+            // Keep UI running in local persisted mode; server state can recover later.
+          } finally {
+            protectionRestoreInFlightRef.current = false;
+          }
+        }
+      }
+
+      setProtectionEnabled(effectiveProtectionEnabled || wantProtection);
 
       setProbes(mon.healthProbes || []);
       setHealthStats(mon.healthStats || { avgResponseTime: 0, availability: 100, currentStatus: 'unknown' });
@@ -198,12 +241,13 @@ export default function Dashboard() {
       es.addEventListener('init', (event: MessageEvent) => {
         try {
           const data: FullState = JSON.parse(event.data);
+          const persistedProtection = localStorage.getItem(PROTECTION_STORAGE_KEY) === 'true';
           if (data.targetUrl) setTargetUrl(data.targetUrl);
           setMonitoring(data.monitoring);
           setProbes(data.healthProbes || []);
           setHealthStats(data.healthStats);
           setBlockedIPs(data.blockedIPs || []);
-          setProtectionEnabled(data.protectionEnabled || false);
+          setProtectionEnabled(!!data.protectionEnabled || persistedProtection);
           setAlerts(data.alerts || []);
           if (data.externalAttackData) setAttackData(data.externalAttackData);
           const localEmailConfig = loadStoredEmailSettings();
@@ -291,6 +335,20 @@ export default function Dashboard() {
     config?.smtpPass,
     config,
   ]);
+
+  useEffect(() => {
+    const savedProtectionTarget = localStorage.getItem(PROTECTION_TARGET_STORAGE_KEY);
+    if (savedProtectionTarget) {
+      setProtectedDomain(savedProtectionTarget);
+    }
+  }, []);
+
+  useEffect(() => {
+    const trimmed = protectedDomain.trim();
+    if (trimmed) {
+      localStorage.setItem(PROTECTION_TARGET_STORAGE_KEY, trimmed);
+    }
+  }, [protectedDomain]);
 
   // Animated mitigation logs
   useEffect(() => {
@@ -396,8 +454,15 @@ export default function Dashboard() {
       return;
     }
 
+    const popupTarget = encodeURIComponent(
+      protectedDomain.trim() ||
+      targetUrl.trim() ||
+      localStorage.getItem(PROTECTION_TARGET_STORAGE_KEY) ||
+      'website'
+    );
+
     const popup = window.open(
-      '/mitigation-terminal',
+      `/mitigation-terminal?requested=1&target=${popupTarget}`,
       'shieldwall_mitigation_terminal',
       'popup=yes,width=560,height=420,left=120,top=120,resizable=yes,scrollbars=yes'
     );
@@ -409,7 +474,7 @@ export default function Dashboard() {
     }
 
     setStatusMsg('⚠️ Popup blocked. Allow popups to open the mitigation terminal window.');
-  }, []);
+  }, [protectedDomain, targetUrl]);
 
   // ---- Protection toggle ----
   const toggleProtection = async (enable: boolean) => {
@@ -427,6 +492,11 @@ export default function Dashboard() {
       setProtectionEnabled(data.protectionEnabled);
 
       if (data.protectionEnabled) {
+        localStorage.setItem(PROTECTION_STORAGE_KEY, 'true');
+        if (requestedTarget) {
+          localStorage.setItem(PROTECTION_TARGET_STORAGE_KEY, requestedTarget);
+        }
+
         openMitigationTerminal();
         setStatusMsg(
           data.engine?.mode === 'python'
@@ -434,6 +504,8 @@ export default function Dashboard() {
             : '🛡️ Protection ENABLED — fallback mode active. Mitigation terminal opened.'
         );
       } else {
+        localStorage.setItem(PROTECTION_STORAGE_KEY, 'false');
+
         if (terminalWindowRef.current && !terminalWindowRef.current.closed) {
           terminalWindowRef.current.close();
         }
@@ -698,8 +770,6 @@ export default function Dashboard() {
                     }
 
                     const newState = !protectionEnabled;
-                    localStorage.setItem('shieldwall_protect_active', newState ? 'true' : 'false');
-
                     await toggleProtection(newState);
                   }}
                   disabled={loading || (!protectionEnabled && !protectedDomain.trim())}

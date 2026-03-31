@@ -5,11 +5,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { store } from '@/lib/store';
 import { startPythonMitigation, stopPythonMitigation } from '@/lib/pythonEngineBridge';
-import { hydrateStoreFromDurableState, persistStoreToDurableState } from '@/lib/durableState';
 
 export async function GET() {
-  await hydrateStoreFromDurableState();
-
   return NextResponse.json({
     config: store.config,
     blockedIPs: store.getBlockedIPs(),
@@ -22,8 +19,6 @@ export async function GET() {
 
 export async function POST(request: NextRequest) {
   try {
-    await hydrateStoreFromDurableState();
-
     const body = await request.json();
     const { action } = body;
 
@@ -32,7 +27,6 @@ export async function POST(request: NextRequest) {
       case 'updateConfig': {
         const { config } = body;
         if (config) Object.assign(store.config, config);
-        await persistStoreToDurableState();
         return NextResponse.json({ success: true, config: store.config });
       }
       case 'toggleProtection': {
@@ -71,9 +65,6 @@ export async function POST(request: NextRequest) {
             : '⚠️ Protection DISABLED — ShieldWall firewall is now off.',
           severity: newState ? 'info' : 'warning',
         });
-
-        await persistStoreToDurableState();
-
         return NextResponse.json({
           success: true,
           protectionEnabled: store.protectionEnabled,

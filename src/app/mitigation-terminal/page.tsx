@@ -38,6 +38,8 @@ const DROP_LINES_PER_CYCLE = 70;
 const ATTACK_LATENCY_MS = 1800;
 const HIGH_PROBE_WINDOW = 6;
 const HIGH_PROBE_REQUIRED = 3;
+const PROTECTION_STORAGE_KEY = 'shieldwall_protect_active';
+const PROTECTION_TARGET_STORAGE_KEY = 'shieldwall_protect_target';
 
 function lineColor(line: string): string {
   if (line.startsWith('[ALERT]')) return '#ffbd2e';
@@ -61,8 +63,10 @@ function isProbeSuspicious(probe: HealthProbe): boolean {
 export default function MitigationTerminalPage() {
   const [lines, setLines] = useState<string[]>([]);
   const [protectionEnabled, setProtectionEnabled] = useState(false);
+  const [clientProtectionEnabled, setClientProtectionEnabled] = useState(false);
   const [attackData, setAttackData] = useState<AttackState | null>(null);
   const [monitorAttackActive, setMonitorAttackActive] = useState(false);
+  const [browserTarget, setBrowserTarget] = useState('Website');
 
   const viewportRef = useRef<HTMLDivElement | null>(null);
   const mitigatedTotalRef = useRef<number>(0);
@@ -75,6 +79,31 @@ export default function MitigationTerminalPage() {
   const monitorAttackActiveRef = useRef(false);
   const recentProbesRef = useRef<HealthProbe[]>([]);
   const healthStatsRef = useRef<HealthStats | null>(null);
+
+  const readClientProtectionState = (): boolean => {
+    if (typeof window === 'undefined') return false;
+
+    const fromStorage = localStorage.getItem(PROTECTION_STORAGE_KEY) === 'true';
+    const params = new URLSearchParams(window.location.search);
+    const fromQuery = params.get('requested') === '1';
+
+    return fromStorage || fromQuery;
+  };
+
+  const readClientTarget = (): string => {
+    if (typeof window === 'undefined') return 'Website';
+
+    const params = new URLSearchParams(window.location.search);
+    const fromQuery = (params.get('target') || '').trim();
+    const fromStorage = (localStorage.getItem(PROTECTION_TARGET_STORAGE_KEY) || '').trim();
+    const rawTarget = fromQuery || fromStorage || 'Website';
+
+    try {
+      return decodeURIComponent(rawTarget);
+    } catch {
+      return rawTarget;
+    }
+  };
 
   const pushLines = (next: string[]) => {
     setLines(prev => [...prev, ...next].slice(-MAX_LINES));
@@ -147,7 +176,7 @@ export default function MitigationTerminalPage() {
   };
 
   const makeOnlineCycle = (): string[] => {
-    const target = safeText(attackData?.target, 'Website');
+    const target = safeText(attackData?.target, browserTarget);
     return [
       '',
       `[INFO] ${target} is ONLINE. No active attack detected.`,
@@ -157,12 +186,39 @@ export default function MitigationTerminalPage() {
   };
 
   useEffect(() => {
+    const syncClientState = () => {
+      const persisted = readClientProtectionState();
+      const target = readClientTarget();
+      setClientProtectionEnabled(persisted);
+      setBrowserTarget(target);
+    };
+
+    syncClientState();
+
+    const onStorage = (event: StorageEvent) => {
+      if (
+        event.key === PROTECTION_STORAGE_KEY ||
+        event.key === PROTECTION_TARGET_STORAGE_KEY ||
+        event.key === null
+      ) {
+        syncClientState();
+      }
+    };
+
+    window.addEventListener('storage', onStorage);
+    return () => {
+      window.removeEventListener('storage', onStorage);
+    };
+  }, []);
+
+  useEffect(() => {
     const es = new EventSource('/api/monitor/stream');
 
     es.addEventListener('init', (event: MessageEvent) => {
       try {
         const payload = JSON.parse(event.data) as StreamInitPayload;
-        const enabled = !!payload.protectionEnabled;
+        const persistedClientProtection = readClientProtectionState();
+        const enabled = !!payload.protectionEnabled || persistedClientProtection;
         const monitoring = !!payload.monitoring;
         const incomingAttackData = payload.externalAttackData || null;
         const externalActive = !!incomingAttackData?.active;
@@ -182,6 +238,7 @@ export default function MitigationTerminalPage() {
         previousEffectiveAttackRef.current = initialEffectiveAttack;
 
         setProtectionEnabled(enabled);
+        setClientProtectionEnabled(persistedClientProtection);
         setAttackData(incomingAttackData);
         setLines([]);
 
@@ -276,7 +333,8 @@ export default function MitigationTerminalPage() {
 
   useEffect(() => {
     const timer = setInterval(() => {
-      if (!protectionEnabled) return;
+      const effectiveProtectionEnabled = protectionEnabled || clientProtectionEnabled;
+      if (!effectiveProtectionEnabled) return;
 
       const effectiveAttackActive = externalAttackActiveRef.current || monitorAttackActiveRef.current;
 
@@ -288,8 +346,9 @@ export default function MitigationTerminalPage() {
     }, CYCLE_MS);
 
     return () => clearInterval(timer);
-  }, [attackData, protectionEnabled]);
+  }, [attackData, protectionEnabled, clientProtectionEnabled, browserTarget]);
 
+  const effectiveProtectionEnabled = protectionEnabled || clientProtectionEnabled;
   const isAttackActive = !!attackData?.active || monitorAttackActive;
 
   return (
@@ -331,8 +390,8 @@ export default function MitigationTerminalPage() {
             <span style={{ marginLeft: 8, color: '#8aa4bb' }}>ShieldWall Mitigation Console</span>
           </div>
 
-          <div style={{ color: protectionEnabled ? '#27c93f' : '#ff5f56' }}>
-            {protectionEnabled ? (isAttackActive ? 'PROTECTION ON / ATTACK ACTIVE' : 'PROTECTION ON / STANDBY') : 'PROTECTION OFF'}
+          <div style={{ color: effectiveProtectionEnabled ? '#27c93f' : '#ff5f56' }}>
+            {effectiveProtectionEnabled ? (isAttackActive ? 'PROTECTION ON / ATTACK ACTIVE' : 'PROTECTION ON / STANDBY') : 'PROTECTION OFF'}
           </div>
         </div>
 
