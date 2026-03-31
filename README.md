@@ -16,6 +16,38 @@ bun dev
 
 Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
 
+## Optional Python Engine Bridge
+
+ShieldWall now supports an optional Python detection/mitigation bridge.
+If Python is unavailable, the Next.js firewall still works in fallback mode.
+
+### 1) Start the Python bridge (from project root)
+
+```bash
+python python_engine_bridge.py
+```
+
+This starts a local API on `http://127.0.0.1:5050`.
+
+### 2) Configure Next.js to use the bridge
+
+Create `firewall-dashboard/.env.local`:
+
+```bash
+PY_ENGINE_URL=http://127.0.0.1:5050
+```
+
+### 3) Start dashboard
+
+```bash
+npm run dev
+```
+
+When protection is enabled from the Protect tab:
+- ShieldWall tries Python mitigation first.
+- If unavailable, it automatically falls back to built-in Next.js logic.
+- A small mitigation terminal popup opens with live engine logs and demo output.
+
 You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
 
 This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.

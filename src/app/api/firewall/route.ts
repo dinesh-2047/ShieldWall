@@ -4,6 +4,7 @@
 
 import { NextRequest, NextResponse } from 'next/server';
 import { store } from '@/lib/store';
+import { startPythonMitigation, stopPythonMitigation } from '@/lib/pythonEngineBridge';
 
 export async function GET() {
   return NextResponse.json({
@@ -30,8 +31,33 @@ export async function POST(request: NextRequest) {
       }
       case 'toggleProtection': {
         const newState = body.enabled !== undefined ? body.enabled : !store.protectionEnabled;
+        const requestedTarget = typeof body.targetUrl === 'string' ? body.targetUrl.trim() : '';
+
         store.protectionEnabled = newState;
         store.protectionLockedOn = newState;
+
+        const engineResult = newState
+          ? await startPythonMitigation(requestedTarget || store.targetUrl || 'localhost')
+          : await stopPythonMitigation();
+
+        store.addEngineLog({
+          source: engineResult.mode === 'python' ? 'python' : 'fallback',
+          level: newState
+            ? (engineResult.connected ? 'info' : 'warning')
+            : 'info',
+          message: engineResult.message,
+          simulated: !!engineResult.simulated,
+        });
+
+        store.addEngineLog({
+          source: 'proxy',
+          level: newState ? 'info' : 'warning',
+          message: newState
+            ? 'Reverse proxy mitigation is active in Next.js runtime.'
+            : 'Reverse proxy mitigation is now disabled.',
+          simulated: false,
+        });
+
         store.addAlert({
           type: newState ? 'attack_stopped' : 'attack_detected',
           message: newState
@@ -39,7 +65,11 @@ export async function POST(request: NextRequest) {
             : '⚠️ Protection DISABLED — ShieldWall firewall is now off.',
           severity: newState ? 'info' : 'warning',
         });
-        return NextResponse.json({ success: true, protectionEnabled: store.protectionEnabled });
+        return NextResponse.json({
+          success: true,
+          protectionEnabled: store.protectionEnabled,
+          engine: engineResult,
+        });
       }
       default:
         return NextResponse.json({ error: 'Unknown action' }, { status: 400 });
