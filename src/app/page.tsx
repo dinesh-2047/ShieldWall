@@ -50,6 +50,59 @@ interface ExternalAttackData {
   lastUpdate: number;
 }
 
+interface HealingAction {
+  id: string;
+  timestamp: number;
+  faultId: string;
+  faultType: string;
+  actions: string[];
+  result: 'success' | 'partial' | 'failed';
+  recoveryTimeMs: number;
+  verificationProbe?: { available: boolean; responseTime: number };
+}
+
+interface FaultEvent {
+  id: string;
+  timestamp: number;
+  type: string;
+  affectedNode: string;
+  severity: 'warning' | 'critical';
+  details: string;
+  resolved: boolean;
+  resolvedAt?: number;
+}
+
+interface AttackClassificationEntry {
+  id: string;
+  timestamp: number;
+  type: string;
+  confidence: number;
+  indicators: string[];
+  sourceIP?: string;
+  target: string;
+  severity: string;
+  mitigationHint: string;
+}
+
+interface MonitoredNode {
+  id: string;
+  url: string;
+  label: string;
+  status: 'online' | 'down' | 'degraded' | 'isolated' | 'unknown';
+  avgResponseTime: number;
+  availability: number;
+  isolated: boolean;
+  failoverUrl?: string;
+}
+
+interface HealingStats {
+  total: number;
+  success: number;
+  partial: number;
+  failed: number;
+  avgRecoveryMs: number;
+}
+
 interface FullState {
   targetUrl: string;
   monitoring: boolean;
@@ -59,6 +112,13 @@ interface FullState {
   blockedIPs: BlockedIP[];
   alerts: AlertEntry[];
   externalAttackData: ExternalAttackData | null;
+  selfHealingEnabled: boolean;
+  healingActions: HealingAction[];
+  faultEvents: FaultEvent[];
+  healingStats: HealingStats;
+  monitoredNodes: MonitoredNode[];
+  attackClassifications: AttackClassificationEntry[];
+  isolatedNodes: string[];
   config: {
     rateLimit: number;
     rateLimitWindow: number;
@@ -108,7 +168,7 @@ export default function Dashboard() {
   const [healthStats, setHealthStats] = useState<HealthStats>({ avgResponseTime: 0, availability: 100, currentStatus: 'unknown' });
   const [blockedIPs, setBlockedIPs] = useState<BlockedIP[]>([]);
   const [alerts, setAlerts] = useState<AlertEntry[]>([]);
-  const [activeTab, setActiveTab] = useState<'monitor' | 'protect' | 'attack' | 'alerts' | 'settings'>('monitor');
+  const [activeTab, setActiveTab] = useState<'monitor' | 'protect' | 'attack' | 'alerts' | 'settings' | 'selfheal' | 'analytics'>('monitor');
   const [attackPassword, setAttackPassword] = useState('');
   const [attackUnlocked, setAttackUnlocked] = useState(false);
   const [protectedDomain, setProtectedDomain] = useState('');
@@ -124,6 +184,13 @@ export default function Dashboard() {
   const terminalWindowRef = useRef<Window | null>(null);
   const protectionRestoreInFlightRef = useRef(false);
   const lastProtectionRestoreAttemptRef = useRef(0);
+  // Self-healing state
+  const [selfHealingEnabled, setSelfHealingEnabled] = useState(true);
+  const [healingActions, setHealingActions] = useState<HealingAction[]>([]);
+  const [faultEvents, setFaultEvents] = useState<FaultEvent[]>([]);
+  const [healingStats, setHealingStats] = useState<HealingStats>({ total: 0, success: 0, partial: 0, failed: 0, avgRecoveryMs: 0 });
+  const [monitoredNodes, setMonitoredNodes] = useState<MonitoredNode[]>([]);
+  const [attackClassifications, setAttackClassifications] = useState<AttackClassificationEntry[]>([]);
 
   // ---- Fetch full state ----
   const fetchState = useCallback(async () => {
@@ -221,6 +288,17 @@ export default function Dashboard() {
       setProxyForwarded(fw.totalForwarded || 0);
       setProxyBlocked(fw.totalBlocked || 0);
       if (atk.attackData) setAttackData(atk.attackData);
+      // Fetch healing state
+      try {
+        const healRes = await fetch('/api/healing', { cache: 'no-store' });
+        const heal = await healRes.json();
+        setSelfHealingEnabled(!!heal.selfHealingEnabled);
+        setHealingActions(heal.healingActions || []);
+        setFaultEvents(heal.faultEvents || []);
+        setHealingStats(heal.healingStats || { total: 0, success: 0, partial: 0, failed: 0, avgRecoveryMs: 0 });
+        setMonitoredNodes(heal.monitoredNodes || []);
+        setAttackClassifications(heal.attackClassifications || []);
+      } catch { /* healing API optional */ }
     } catch (err) {
       console.error('Fetch error:', err);
     }
@@ -252,6 +330,13 @@ export default function Dashboard() {
           if (data.externalAttackData) setAttackData(data.externalAttackData);
           const localEmailConfig = loadStoredEmailSettings();
           setConfig({ ...data.config, ...localEmailConfig });
+          // Healing state from init
+          if (data.selfHealingEnabled !== undefined) setSelfHealingEnabled(data.selfHealingEnabled);
+          if (data.healingActions) setHealingActions(data.healingActions);
+          if (data.faultEvents) setFaultEvents(data.faultEvents);
+          if (data.healingStats) setHealingStats(data.healingStats);
+          if (data.monitoredNodes) setMonitoredNodes(data.monitoredNodes);
+          if (data.attackClassifications) setAttackClassifications(data.attackClassifications);
         } catch { /* ignore */ }
       });
 
@@ -277,6 +362,28 @@ export default function Dashboard() {
 
       es.addEventListener('blocked', () => {
         fetchState(); // Refresh blocked IPs
+      });
+
+      es.addEventListener('healing', (event: MessageEvent) => {
+        try {
+          const action: HealingAction = JSON.parse(event.data);
+          setHealingActions(prev => [action, ...prev.slice(0, 49)]);
+          setHealingStats(prev => ({ ...prev, total: prev.total + 1, [action.result]: (prev[action.result] || 0) + 1 }));
+        } catch { /* ignore */ }
+      });
+
+      es.addEventListener('fault', (event: MessageEvent) => {
+        try {
+          const fault: FaultEvent = JSON.parse(event.data);
+          setFaultEvents(prev => [fault, ...prev.slice(0, 49)]);
+        } catch { /* ignore */ }
+      });
+
+      es.addEventListener('attackClassification', (event: MessageEvent) => {
+        try {
+          const c: AttackClassificationEntry = JSON.parse(event.data);
+          setAttackClassifications(prev => [c, ...prev.slice(0, 29)]);
+        } catch { /* ignore */ }
       });
 
       es.onerror = () => {
@@ -548,7 +655,7 @@ export default function Dashboard() {
               WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent',
             }}>ShieldWall</h1>
             <p style={{ fontSize: 11, color: 'var(--text-secondary)', marginTop: 1 }}>
-              DDoS Prevention & Live Website Monitoring
+              DDoS Prevention • Self-Healing Network • Live Monitoring
             </p>
           </div>
         </div>
@@ -598,6 +705,8 @@ export default function Dashboard() {
         {([
           { key: 'monitor', icon: '📡', label: 'Monitor' },
           { key: 'protect', icon: '🛡️', label: 'Protect' },
+          { key: 'selfheal', icon: '🧬', label: 'Self-Heal' },
+          { key: 'analytics', icon: '📊', label: 'Analytics' },
           // { key: 'attack', icon: '⚡', label: 'Attack' },
           { key: 'alerts', icon: '🔔', label: 'Alerts' },
           { key: 'settings', icon: '⚙️', label: 'Settings' },
@@ -923,6 +1032,233 @@ export default function Dashboard() {
         </div>
       )}
 
+      {/* ======== SELF-HEAL TAB ======== */}
+      {activeTab === 'selfheal' && (
+        <div className="fade-in">
+          {/* Header + Toggle */}
+          <div className="glass-card heal-pulse" style={{ padding: 28, marginBottom: 20, borderLeft: `4px solid ${selfHealingEnabled ? '#8b5cf6' : '#ef4444'}` }}>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 16 }}>
+              <div>
+                <h3 style={{ fontSize: 20, fontWeight: 800, marginBottom: 6 }}>🧬 Self-Healing Engine</h3>
+                <p style={{ fontSize: 13, color: 'var(--text-secondary)' }}>
+                  {selfHealingEnabled
+                    ? 'Autonomous fault detection & recovery is ACTIVE'
+                    : 'Self-healing is DISABLED — faults will not be auto-recovered'}
+                </p>
+              </div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                  <div style={{ width: 14, height: 14, borderRadius: '50%', background: selfHealingEnabled ? '#8b5cf6' : '#ef4444', boxShadow: `0 0 12px ${selfHealingEnabled ? '#8b5cf6' : '#ef4444'}`, animation: selfHealingEnabled ? 'pulse-heal 2s infinite' : 'none' }} />
+                  <span style={{ fontWeight: 700, fontSize: 15, color: selfHealingEnabled ? '#8b5cf6' : '#ef4444' }}>
+                    {selfHealingEnabled ? 'ACTIVE' : 'DISABLED'}
+                  </span>
+                </div>
+                <button
+                  className={selfHealingEnabled ? 'btn-danger' : 'btn-primary'}
+                  onClick={async () => {
+                    const res = await fetch('/api/healing', {
+                      method: 'POST', headers: { 'Content-Type': 'application/json' },
+                      body: JSON.stringify({ action: 'toggle', enabled: !selfHealingEnabled }),
+                    });
+                    const data = await res.json();
+                    if (data.success) setSelfHealingEnabled(data.selfHealingEnabled);
+                  }}
+                  style={{ fontSize: 14, padding: '12px 28px' }}
+                >
+                  {selfHealingEnabled ? '⏹ Disable' : '🧬 Enable'}
+                </button>
+              </div>
+            </div>
+          </div>
+
+          {/* Stats Row */}
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(170px, 1fr))', gap: 14, marginBottom: 20 }}>
+            <StatCard icon="🧬" label="Total Healed" value={String(healingStats.total)} color="#8b5cf6" />
+            <StatCard icon="✅" label="Success" value={String(healingStats.success)} color="#10b981" />
+            <StatCard icon="⚠️" label="Partial" value={String(healingStats.partial)} color="#f59e0b" />
+            <StatCard icon="❌" label="Failed" value={String(healingStats.failed)} color="#ef4444" />
+            <StatCard icon="⏱️" label="Avg Recovery" value={healingStats.avgRecoveryMs > 0 ? `${Math.round(healingStats.avgRecoveryMs / 1000)}s` : '—'} color="#00d4ff" />
+            <StatCard icon="🔍" label="Active Faults" value={String(faultEvents.filter(f => !f.resolved).length)} color={faultEvents.some(f => !f.resolved) ? '#ef4444' : '#10b981'} />
+          </div>
+
+          {/* Network Topology */}
+          <div className="glass-card" style={{ padding: 24, marginBottom: 20 }}>
+            <h3 style={{ fontSize: 16, fontWeight: 700, marginBottom: 16 }}>🗺️ Network Topology</h3>
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 16, justifyContent: 'center', minHeight: 120 }}>
+              {/* ShieldWall central node */}
+              <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 8 }}>
+                <div style={{ width: 80, height: 80, borderRadius: '50%', background: 'linear-gradient(135deg, #00d4ff, #8b5cf6)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 32, boxShadow: '0 0 30px rgba(0,212,255,0.3)' }}>🛡️</div>
+                <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--accent-blue)' }}>ShieldWall</span>
+              </div>
+              {/* Connection lines */}
+              {monitoredNodes.length > 0 && <div style={{ display: 'flex', alignItems: 'center', color: '#333', fontSize: 24 }}>→</div>}
+              {/* Monitored nodes */}
+              {monitoredNodes.map(node => (
+                <div key={node.id} className="topo-node" style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 8 }}>
+                  <div style={{
+                    width: 64, height: 64, borderRadius: '50%',
+                    background: node.status === 'online' ? 'rgba(16,185,129,0.2)' : node.status === 'down' ? 'rgba(239,68,68,0.2)' : node.status === 'isolated' ? 'rgba(245,158,11,0.15)' : node.status === 'degraded' ? 'rgba(245,158,11,0.2)' : 'rgba(255,255,255,0.05)',
+                    border: `2px ${node.isolated ? 'dashed' : 'solid'} ${node.status === 'online' ? '#10b981' : node.status === 'down' ? '#ef4444' : node.status === 'isolated' ? '#f59e0b' : node.status === 'degraded' ? '#f59e0b' : '#555'}`,
+                    display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 22,
+                    boxShadow: `0 0 15px ${node.status === 'online' ? 'rgba(16,185,129,0.3)' : node.status === 'down' ? 'rgba(239,68,68,0.3)' : 'transparent'}`,
+                  }}>
+                    {node.status === 'online' ? '🟢' : node.status === 'down' ? '🔴' : node.status === 'isolated' ? '🔒' : node.status === 'degraded' ? '🟡' : '⚪'}
+                  </div>
+                  <span style={{ fontSize: 10, fontWeight: 600, color: 'var(--text-secondary)', maxWidth: 80, textAlign: 'center', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{node.label}</span>
+                  <span className={`badge ${node.status === 'online' ? 'badge-success' : node.status === 'down' ? 'badge-danger' : 'badge-warning'}`} style={{ fontSize: 9 }}>{node.status}</span>
+                </div>
+              ))}
+              {monitoredNodes.length === 0 && (
+                <p style={{ color: 'var(--text-secondary)', fontSize: 13, padding: 20 }}>Start monitoring a website to see it in the topology.</p>
+              )}
+            </div>
+          </div>
+
+          {/* Healing Timeline */}
+          <div className="glass-card" style={{ padding: 24, marginBottom: 20 }}>
+            <h3 style={{ fontSize: 16, fontWeight: 700, marginBottom: 16 }}>📋 Healing Action Log</h3>
+            {healingActions.length === 0 && <p style={{ color: 'var(--text-secondary)', textAlign: 'center', padding: 30 }}>No healing actions yet. The engine will act when faults are detected.</p>}
+            <div className="heal-timeline">
+              {healingActions.slice(0, 20).map(h => (
+                <div key={h.id} className={`heal-timeline-item ${h.result} slide-in`}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
+                    <span className={`badge ${h.result === 'success' ? 'badge-success' : h.result === 'failed' ? 'badge-danger' : 'badge-warning'}`}>{h.result}</span>
+                    <span className="badge badge-heal">{h.faultType}</span>
+                    <span style={{ fontSize: 11, color: '#666', marginLeft: 'auto' }}>{new Date(h.timestamp).toLocaleString()}</span>
+                  </div>
+                  <div style={{ fontSize: 12, color: 'var(--text-secondary)' }}>
+                    {h.actions.map((a, i) => <div key={i} className="playbook-step">{a}</div>)}
+                  </div>
+                  <div style={{ fontSize: 11, color: '#666', marginTop: 6 }}>Recovery time: {h.recoveryTimeMs}ms {h.verificationProbe && `| Verification: ${h.verificationProbe.available ? '✅ PASS' : '❌ FAIL'} (${h.verificationProbe.responseTime}ms)`}</div>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          {/* Fault Events */}
+          <div className="glass-card" style={{ padding: 24, marginBottom: 20 }}>
+            <h3 style={{ fontSize: 16, fontWeight: 700, marginBottom: 16 }}>🔍 Fault Events</h3>
+            {faultEvents.length === 0 && <p style={{ color: 'var(--text-secondary)', textAlign: 'center', padding: 20 }}>No faults detected yet.</p>}
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+              {faultEvents.slice(0, 15).map(f => (
+                <div key={f.id} style={{ padding: '10px 16px', borderRadius: 10, background: f.severity === 'critical' ? 'rgba(239,68,68,0.06)' : 'rgba(245,158,11,0.05)', border: `1px solid ${f.severity === 'critical' ? 'rgba(239,68,68,0.15)' : 'rgba(245,158,11,0.12)'}` }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
+                    <span className={`badge ${f.severity === 'critical' ? 'badge-danger' : 'badge-warning'}`}>{f.type}</span>
+                    <span className={`badge ${f.resolved ? 'badge-success' : 'badge-danger'}`}>{f.resolved ? 'RESOLVED' : 'ACTIVE'}</span>
+                    <span style={{ fontSize: 11, color: '#666', marginLeft: 'auto' }}>{new Date(f.timestamp).toLocaleString()}</span>
+                  </div>
+                  <p style={{ fontSize: 12, color: 'var(--text-secondary)' }}>{f.details}</p>
+                  <p style={{ fontSize: 11, color: '#555' }}>Affected: {f.affectedNode}</p>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          {/* Attack Classifications */}
+          {attackClassifications.length > 0 && (
+            <div className="glass-card" style={{ padding: 24 }}>
+              <h3 style={{ fontSize: 16, fontWeight: 700, marginBottom: 16 }}>🎯 Attack Classifications</h3>
+              <table className="data-table">
+                <thead><tr><th>Time</th><th>Type</th><th>Confidence</th><th>Severity</th><th>Target</th><th>Hint</th></tr></thead>
+                <tbody>
+                  {attackClassifications.slice(0, 10).map(c => (
+                    <tr key={c.id}>
+                      <td>{new Date(c.timestamp).toLocaleTimeString()}</td>
+                      <td><span className="badge badge-heal">{c.type.replace('_', ' ')}</span></td>
+                      <td style={{ color: c.confidence > 0.7 ? '#ef4444' : '#f59e0b' }}>{(c.confidence * 100).toFixed(0)}%</td>
+                      <td><span className={`badge ${c.severity === 'critical' ? 'badge-danger' : c.severity === 'high' ? 'badge-warning' : 'badge-info'}`}>{c.severity}</span></td>
+                      <td style={{ fontSize: 11 }}>{c.target}</td>
+                      <td style={{ fontSize: 11, color: 'var(--text-secondary)' }}>{c.mitigationHint}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* ======== ANALYTICS TAB ======== */}
+      {activeTab === 'analytics' && (
+        <div className="fade-in">
+          {/* Healing Performance */}
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: 14, marginBottom: 20 }}>
+            <StatCard icon="🧬" label="Total Healings" value={String(healingStats.total)} color="#8b5cf6" />
+            <StatCard icon="📊" label="Success Rate" value={healingStats.total > 0 ? `${Math.round((healingStats.success / healingStats.total) * 100)}%` : '—'} color="#10b981" />
+            <StatCard icon="⏱️" label="Avg Recovery" value={healingStats.avgRecoveryMs > 0 ? `${(healingStats.avgRecoveryMs / 1000).toFixed(1)}s` : '—'} color="#00d4ff" />
+            <StatCard icon="🔍" label="Total Faults" value={String(faultEvents.length)} color="#f59e0b" />
+            <StatCard icon="🎯" label="Attacks Classified" value={String(attackClassifications.length)} color="#ef4444" />
+            <StatCard icon="🚫" label="IPs Blocked" value={String(blockedIPs.length)} color="#f59e0b" />
+          </div>
+
+          {/* Healing Success Breakdown */}
+          <div className="glass-card" style={{ padding: 24, marginBottom: 20 }}>
+            <h3 style={{ fontSize: 16, fontWeight: 700, marginBottom: 16 }}>🧬 Healing Success Breakdown</h3>
+            {healingStats.total === 0 ? (
+              <p style={{ color: 'var(--text-secondary)', textAlign: 'center', padding: 20 }}>No healing data yet.</p>
+            ) : (
+              <div style={{ display: 'flex', gap: 20, alignItems: 'center', flexWrap: 'wrap' }}>
+                <div style={{ flex: 1, minWidth: 200 }}>
+                  {[
+                    { label: 'Success', value: healingStats.success, color: '#10b981' },
+                    { label: 'Partial', value: healingStats.partial, color: '#f59e0b' },
+                    { label: 'Failed', value: healingStats.failed, color: '#ef4444' },
+                  ].map(item => (
+                    <div key={item.label} style={{ marginBottom: 12 }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12, marginBottom: 4 }}>
+                        <span style={{ color: item.color, fontWeight: 600 }}>{item.label}</span>
+                        <span style={{ color: 'var(--text-secondary)' }}>{item.value} / {healingStats.total} ({healingStats.total > 0 ? Math.round((item.value / healingStats.total) * 100) : 0}%)</span>
+                      </div>
+                      <div className="progress-bar">
+                        <div className="progress-bar-fill" style={{ width: `${healingStats.total > 0 ? (item.value / healingStats.total) * 100 : 0}%`, background: item.color }} />
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+
+          {/* Attack Classification Distribution */}
+          {attackClassifications.length > 0 && (
+            <div className="glass-card" style={{ padding: 24, marginBottom: 20 }}>
+              <h3 style={{ fontSize: 16, fontWeight: 700, marginBottom: 16 }}>🎯 Attack Type Distribution</h3>
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 12 }}>
+                {Object.entries(
+                  attackClassifications.reduce((acc: Record<string, number>, c) => { acc[c.type] = (acc[c.type] || 0) + 1; return acc; }, {})
+                ).map(([type, count]) => (
+                  <div key={type} style={{ padding: '12px 20px', borderRadius: 12, background: 'rgba(139,92,246,0.08)', border: '1px solid rgba(139,92,246,0.2)', minWidth: 120, textAlign: 'center' }}>
+                    <div style={{ fontSize: 24, fontWeight: 800, color: '#8b5cf6' }}>{count as number}</div>
+                    <div style={{ fontSize: 11, color: 'var(--text-secondary)', marginTop: 4 }}>{type.replace(/_/g, ' ')}</div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Node Health Summary */}
+          {monitoredNodes.length > 0 && (
+            <div className="glass-card" style={{ padding: 24 }}>
+              <h3 style={{ fontSize: 16, fontWeight: 700, marginBottom: 16 }}>📡 Node Health Summary</h3>
+              <table className="data-table">
+                <thead><tr><th>Node</th><th>Status</th><th>Availability</th><th>Avg Response</th><th>Isolated</th></tr></thead>
+                <tbody>
+                  {monitoredNodes.map(n => (
+                    <tr key={n.id}>
+                      <td style={{ fontSize: 12 }}>{n.label}</td>
+                      <td><span className={`badge ${n.status === 'online' ? 'badge-success' : n.status === 'down' ? 'badge-danger' : 'badge-warning'}`}>{n.status}</span></td>
+                      <td style={{ color: n.availability < 80 ? '#ef4444' : '#10b981' }}>{n.availability}%</td>
+                      <td style={{ color: n.avgResponseTime > 3000 ? '#ef4444' : n.avgResponseTime > 1000 ? '#f59e0b' : '#10b981' }}>{n.avgResponseTime}ms</td>
+                      <td>{n.isolated ? <span className="badge badge-warning">YES</span> : <span className="badge badge-success">NO</span>}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+      )}
+
       {/* ======== SETTINGS TAB ======== */}
       {activeTab === 'settings' && config && (
         <div className="fade-in">
@@ -952,7 +1288,7 @@ export default function Dashboard() {
 
       {/* Footer */}
       <footer style={{ marginTop: 40, textAlign: 'center', padding: 16, fontSize: 11, color: '#555', borderTop: '1px solid rgba(255,255,255,0.05)' }}>
-        🛡️ ShieldWall — Monitor any website, detect DDoS attacks, block malicious IPs
+        🛡️ ShieldWall — Self-Healing Network Defense • Monitor • Detect • Heal • Protect
       </footer>
     </div>
   );

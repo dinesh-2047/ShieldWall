@@ -1,8 +1,15 @@
 /**
  * In-memory store for the ShieldWall firewall dashboard.
  * Tracks: target website, health probes, attack process state,
- * blocked IPs, traffic through reverse proxy, and alerts.
+ * blocked IPs, traffic through reverse proxy, alerts,
+ * self-healing state, fault events, attack classifications,
+ * multi-node monitoring, and data persistence.
  */
+
+import { AttackClassification } from './attackClassifier';
+import { loadState, saveState, startAutoSave, type PersistedState } from './persistence';
+
+// ============ Existing Interfaces (unchanged) ============
 
 export interface HealthProbe {
   timestamp: number;
@@ -23,7 +30,7 @@ export interface BlockedIP {
 export interface AlertEntry {
   id: string;
   timestamp: number;
-  type: 'attack_detected' | 'site_down' | 'high_latency' | 'ip_blocked' | 'attack_started' | 'attack_stopped' | 'email_alert';
+  type: 'attack_detected' | 'site_down' | 'high_latency' | 'ip_blocked' | 'attack_started' | 'attack_stopped' | 'email_alert' | 'self_healing' | 'fault_detected' | 'node_isolated' | 'node_restored';
   message: string;
   severity: 'info' | 'warning' | 'critical';
 }
@@ -70,14 +77,68 @@ export interface ExternalAttackData {
 export interface EngineLogEntry {
   id: string;
   timestamp: number;
-  source: 'system' | 'proxy' | 'python' | 'fallback';
+  source: 'system' | 'proxy' | 'python' | 'fallback' | 'healer';
   level: 'info' | 'warning' | 'critical';
   message: string;
   simulated: boolean;
 }
 
+// ============ NEW Interfaces for Self-Healing ============
+
+export type FaultType =
+  | 'SERVICE_DOWN'
+  | 'HIGH_LATENCY'
+  | 'DDOS_ATTACK'
+  | 'PARTIAL_OUTAGE'
+  | 'RATE_LIMIT_BREACH';
+
+export interface FaultEvent {
+  id: string;
+  timestamp: number;
+  type: FaultType;
+  affectedNode: string;
+  severity: 'warning' | 'critical';
+  details: string;
+  resolved: boolean;
+  resolvedAt?: number;
+}
+
+export interface HealingAction {
+  id: string;
+  timestamp: number;
+  faultId: string;
+  faultType: FaultType;
+  actions: string[];
+  result: 'success' | 'partial' | 'failed';
+  recoveryTimeMs: number;
+  verificationProbe?: { available: boolean; responseTime: number };
+}
+
+export interface MonitoredNode {
+  id: string;
+  url: string;
+  label: string;
+  status: 'online' | 'down' | 'degraded' | 'isolated' | 'unknown';
+  lastProbe?: HealthProbe;
+  avgResponseTime: number;
+  availability: number;
+  probeHistory: HealthProbe[];
+  failoverUrl?: string;
+  addedAt: number;
+  isolated: boolean;
+}
+
+export interface RecoveryPlaybook {
+  faultType: FaultType;
+  name: string;
+  steps: string[];
+  cooldownMs: number;
+}
+
+// ============ Store Class ============
+
 class FirewallStore {
-  // ---- Target website ----
+  // ---- Target website (primary — existing) ----
   targetUrl: string = '';
   monitoring: boolean = false;
 
@@ -95,7 +156,7 @@ class FirewallStore {
 
   // ---- Reverse proxy (protection mode) ----
   protectionEnabled: boolean = false;
-  protectionLockedOn: boolean = false; // When true, protection stays ON despite serverless restarts
+  protectionLockedOn: boolean = false;
   proxyPort: number = 80;
   proxyRequests: ProxyRequest[] = [];
   private readonly MAX_PROXY_REQUESTS = 5000;
@@ -137,6 +198,177 @@ class FirewallStore {
     smtpPass: '',
   };
 
+  // ============ NEW: Self-Healing State ============
+  selfHealingEnabled: boolean = true;
+  faultEvents: FaultEvent[] = [];
+  private readonly MAX_FAULT_EVENTS = 200;
+  healingActions: HealingAction[] = [];
+  private readonly MAX_HEALING_ACTIONS = 200;
+  isolatedNodes: Set<string> = new Set();
+  failoverTargets: Map<string, string> = new Map();  // primary URL → backup URL
+
+  // ---- Multi-node monitoring ----
+  monitoredNodes: MonitoredNode[] = [];
+
+  // ---- Attack classifications ----
+  attackClassifications: AttackClassification[] = [];
+  private readonly MAX_CLASSIFICATIONS = 100;
+
+  // ---- Recovery playbooks ----
+  readonly playbooks: RecoveryPlaybook[] = [
+    {
+      faultType: 'SERVICE_DOWN',
+      name: 'Service Recovery',
+      steps: [
+        'Verify service status with probe',
+        'Attempt connection retry (3x)',
+        'Enable protection proxy if not active',
+        'Switch to failover target if configured',
+        'Isolate faulty node from topology',
+        'Send critical alert notification',
+      ],
+      cooldownMs: 30000,
+    },
+    {
+      faultType: 'HIGH_LATENCY',
+      name: 'Latency Mitigation',
+      steps: [
+        'Measure baseline response time',
+        'Enable protection proxy for traffic filtering',
+        'Increase rate limiting aggressiveness (÷2)',
+        'Reroute through protection proxy',
+        'Monitor for improvement over 10s window',
+      ],
+      cooldownMs: 20000,
+    },
+    {
+      faultType: 'DDOS_ATTACK',
+      name: 'DDoS Defense',
+      steps: [
+        'Auto-enable firewall protection',
+        'Classify attack type from telemetry',
+        'Auto-block attacking IP addresses',
+        'Activate mitigation engine',
+        'Send incident alert email',
+        'Generate attack classification report',
+      ],
+      cooldownMs: 15000,
+    },
+    {
+      faultType: 'PARTIAL_OUTAGE',
+      name: 'Partial Outage Recovery',
+      steps: [
+        'Identify affected vs healthy nodes',
+        'Isolate affected nodes',
+        'Reroute traffic to healthy nodes',
+        'Attempt recovery of isolated nodes',
+        'Verify restored connectivity',
+      ],
+      cooldownMs: 25000,
+    },
+    {
+      faultType: 'RATE_LIMIT_BREACH',
+      name: 'Rate Limit Enforcement',
+      steps: [
+        'Identify offending IP addresses',
+        'Tighten rate limit thresholds',
+        'Auto-block repeat offenders',
+        'Log violation details',
+      ],
+      cooldownMs: 10000,
+    },
+  ];
+
+  // Track last playbook execution time per fault type to enforce cooldowns
+  private lastPlaybookRun: Map<string, number> = new Map();
+
+  constructor() {
+    // Load persisted state on creation
+    this.loadPersistedState();
+  }
+
+  // ============ Persistence ============
+  private loadPersistedState(): void {
+    const saved = loadState();
+    if (!saved) return;
+
+    // Restore config
+    if (saved.config) {
+      this.config = { ...this.config, ...saved.config } as FirewallConfig;
+    }
+
+    // Restore blocked IPs
+    if (Array.isArray(saved.blockedIPs)) {
+      for (const ip of saved.blockedIPs) {
+        this.blockedIPs.set(ip.ip, ip);
+      }
+    }
+
+    // Restore alerts (last 100 only)
+    if (Array.isArray(saved.alerts)) {
+      this.alerts = saved.alerts.slice(-100) as unknown as AlertEntry[];
+    }
+
+    // Restore healing data
+    if (Array.isArray(saved.healingActions)) {
+      this.healingActions = saved.healingActions as unknown as HealingAction[];
+    }
+    if (Array.isArray(saved.faultEvents)) {
+      this.faultEvents = saved.faultEvents as unknown as FaultEvent[];
+    }
+    if (Array.isArray(saved.attackClassifications)) {
+      this.attackClassifications = saved.attackClassifications as unknown as AttackClassification[];
+    }
+    if (typeof saved.selfHealingEnabled === 'boolean') {
+      this.selfHealingEnabled = saved.selfHealingEnabled;
+    }
+
+    // Restore multi-node
+    if (Array.isArray(saved.monitoredNodes)) {
+      this.monitoredNodes = saved.monitoredNodes as unknown as MonitoredNode[];
+    }
+
+    // Restore failover targets
+    if (saved.failoverTargets && typeof saved.failoverTargets === 'object') {
+      for (const [k, v] of Object.entries(saved.failoverTargets)) {
+        this.failoverTargets.set(k, v);
+      }
+    }
+
+    // Restore isolated nodes
+    if (Array.isArray(saved.isolatedNodes)) {
+      for (const n of saved.isolatedNodes) {
+        this.isolatedNodes.add(n);
+      }
+    }
+
+    console.log('[Store] Persisted state restored successfully');
+  }
+
+  getPersistedState(): PersistedState {
+    return {
+      savedAt: Date.now(),
+      config: this.config as unknown as Record<string, unknown>,
+      blockedIPs: this.getBlockedIPs(),
+      alerts: this.alerts.slice(-100) as unknown as Array<Record<string, unknown>>,
+      healingActions: this.healingActions as unknown as Array<Record<string, unknown>>,
+      faultEvents: this.faultEvents as unknown as Array<Record<string, unknown>>,
+      attackClassifications: this.attackClassifications as unknown as Array<Record<string, unknown>>,
+      selfHealingEnabled: this.selfHealingEnabled,
+      monitoredNodes: this.monitoredNodes as unknown as Array<Record<string, unknown>>,
+      failoverTargets: Object.fromEntries(this.failoverTargets),
+      isolatedNodes: Array.from(this.isolatedNodes),
+    };
+  }
+
+  startPersistence(): void {
+    startAutoSave(() => this.getPersistedState(), 30000);
+  }
+
+  persistNow(): void {
+    saveState(this.getPersistedState());
+  }
+
   // ============ SSE ============
   addSSEClient(controller: ReadableStreamDefaultController) {
     this.sseClients.add(controller);
@@ -165,6 +397,28 @@ class FirewallStore {
       this.healthProbes = this.healthProbes.slice(-this.MAX_PROBES);
     }
     this.broadcastSSE('health', probe);
+
+    // Also update the primary node in monitoredNodes if it exists
+    const primaryNode = this.monitoredNodes.find(n => n.url === this.targetUrl);
+    if (primaryNode) {
+      primaryNode.lastProbe = probe;
+      primaryNode.status = probe.available
+        ? (probe.responseTime > 3000 ? 'degraded' : 'online')
+        : 'down';
+      primaryNode.probeHistory.push(probe);
+      if (primaryNode.probeHistory.length > 120) {
+        primaryNode.probeHistory = primaryNode.probeHistory.slice(-120);
+      }
+      // Recalculate stats
+      const recent = primaryNode.probeHistory.slice(-30);
+      const up = recent.filter(p => p.available);
+      primaryNode.avgResponseTime = up.length > 0
+        ? Math.round(up.reduce((s, p) => s + p.responseTime, 0) / up.length)
+        : 0;
+      primaryNode.availability = recent.length > 0
+        ? Math.round((up.length / recent.length) * 100)
+        : 100;
+    }
 
     // Alert if site goes down
     if (!probe.available && this.healthProbes.length >= 2) {
@@ -347,6 +601,173 @@ class FirewallStore {
     return this.engineLogs.slice(-limit);
   }
 
+  // ============ NEW: Fault Events ============
+  addFaultEvent(params: {
+    type: FaultType;
+    affectedNode: string;
+    severity: 'warning' | 'critical';
+    details: string;
+  }): FaultEvent {
+    const fault: FaultEvent = {
+      id: `fault_${Date.now()}_${Math.random().toString(36).substr(2, 6)}`,
+      timestamp: Date.now(),
+      resolved: false,
+      ...params,
+    };
+    this.faultEvents.push(fault);
+    if (this.faultEvents.length > this.MAX_FAULT_EVENTS) {
+      this.faultEvents = this.faultEvents.slice(-this.MAX_FAULT_EVENTS);
+    }
+    this.addAlert({
+      type: 'fault_detected',
+      message: `🔍 Fault detected: ${params.type} on ${params.affectedNode} — ${params.details}`,
+      severity: params.severity,
+    });
+    this.broadcastSSE('fault', fault);
+    return fault;
+  }
+
+  resolveFault(faultId: string): void {
+    const fault = this.faultEvents.find(f => f.id === faultId);
+    if (fault) {
+      fault.resolved = true;
+      fault.resolvedAt = Date.now();
+    }
+  }
+
+  getUnresolvedFaults(): FaultEvent[] {
+    return this.faultEvents.filter(f => !f.resolved);
+  }
+
+  getFaultHistory(limit: number = 50): FaultEvent[] {
+    return this.faultEvents.slice(-limit).reverse();
+  }
+
+  // ============ NEW: Healing Actions ============
+  addHealingAction(action: HealingAction): void {
+    this.healingActions.push(action);
+    if (this.healingActions.length > this.MAX_HEALING_ACTIONS) {
+      this.healingActions = this.healingActions.slice(-this.MAX_HEALING_ACTIONS);
+    }
+    this.addAlert({
+      type: 'self_healing',
+      message: `🧬 Self-healing: ${action.faultType} → ${action.actions.join(', ')} [${action.result.toUpperCase()}]`,
+      severity: action.result === 'failed' ? 'critical' : 'info',
+    });
+    this.broadcastSSE('healing', action);
+    this.addEngineLog({
+      source: 'healer',
+      level: action.result === 'failed' ? 'critical' : 'info',
+      message: `Playbook "${action.faultType}" executed: ${action.actions.join(' → ')} | Result: ${action.result} | Recovery: ${action.recoveryTimeMs}ms`,
+    });
+  }
+
+  getHealingHistory(limit: number = 50): HealingAction[] {
+    return this.healingActions.slice(-limit).reverse();
+  }
+
+  getHealingStats() {
+    const total = this.healingActions.length;
+    const success = this.healingActions.filter(a => a.result === 'success').length;
+    const partial = this.healingActions.filter(a => a.result === 'partial').length;
+    const failed = this.healingActions.filter(a => a.result === 'failed').length;
+    const avgRecovery = total > 0
+      ? Math.round(this.healingActions.reduce((s, a) => s + a.recoveryTimeMs, 0) / total)
+      : 0;
+    return { total, success, partial, failed, avgRecoveryMs: avgRecovery };
+  }
+
+  // ============ NEW: Node Isolation ============
+  isolateNode(nodeUrl: string): void {
+    this.isolatedNodes.add(nodeUrl);
+    const node = this.monitoredNodes.find(n => n.url === nodeUrl);
+    if (node) {
+      node.isolated = true;
+      node.status = 'isolated';
+    }
+    this.addAlert({
+      type: 'node_isolated',
+      message: `🔒 Node isolated: ${nodeUrl} — removed from active traffic routing`,
+      severity: 'warning',
+    });
+    this.broadcastSSE('nodeStatus', { url: nodeUrl, status: 'isolated' });
+  }
+
+  restoreNode(nodeUrl: string): void {
+    this.isolatedNodes.delete(nodeUrl);
+    const node = this.monitoredNodes.find(n => n.url === nodeUrl);
+    if (node) {
+      node.isolated = false;
+      node.status = 'unknown'; // Will be updated on next probe
+    }
+    this.addAlert({
+      type: 'node_restored',
+      message: `🔓 Node restored: ${nodeUrl} — back in active routing`,
+      severity: 'info',
+    });
+    this.broadcastSSE('nodeStatus', { url: nodeUrl, status: 'restored' });
+  }
+
+  // ============ NEW: Multi-Node ============
+  addMonitoredNode(url: string, label?: string, failoverUrl?: string): MonitoredNode {
+    // Avoid duplicates
+    const existing = this.monitoredNodes.find(n => n.url === url);
+    if (existing) return existing;
+
+    const node: MonitoredNode = {
+      id: `node_${Date.now()}_${Math.random().toString(36).substr(2, 6)}`,
+      url,
+      label: label || new URL(url.startsWith('http') ? url : `https://${url}`).hostname,
+      status: 'unknown',
+      avgResponseTime: 0,
+      availability: 100,
+      probeHistory: [],
+      failoverUrl,
+      addedAt: Date.now(),
+      isolated: false,
+    };
+    this.monitoredNodes.push(node);
+    if (failoverUrl) {
+      this.failoverTargets.set(url, failoverUrl);
+    }
+    return node;
+  }
+
+  removeMonitoredNode(nodeId: string): boolean {
+    const idx = this.monitoredNodes.findIndex(n => n.id === nodeId);
+    if (idx === -1) return false;
+    const node = this.monitoredNodes[idx];
+    this.failoverTargets.delete(node.url);
+    this.isolatedNodes.delete(node.url);
+    this.monitoredNodes.splice(idx, 1);
+    return true;
+  }
+
+  // ============ NEW: Attack Classifications ============
+  addAttackClassification(classification: AttackClassification): void {
+    this.attackClassifications.push(classification);
+    if (this.attackClassifications.length > this.MAX_CLASSIFICATIONS) {
+      this.attackClassifications = this.attackClassifications.slice(-this.MAX_CLASSIFICATIONS);
+    }
+    this.broadcastSSE('attackClassification', classification);
+  }
+
+  getAttackClassifications(limit: number = 30): AttackClassification[] {
+    return this.attackClassifications.slice(-limit).reverse();
+  }
+
+  // ============ Playbook Cooldown ============
+  canRunPlaybook(faultType: FaultType): boolean {
+    const playbook = this.playbooks.find(p => p.faultType === faultType);
+    if (!playbook) return false;
+    const lastRun = this.lastPlaybookRun.get(faultType) || 0;
+    return Date.now() - lastRun > playbook.cooldownMs;
+  }
+
+  markPlaybookRun(faultType: FaultType): void {
+    this.lastPlaybookRun.set(faultType, Date.now());
+  }
+
   // ============ Full state snapshot ============
   getFullState() {
     return {
@@ -369,6 +790,14 @@ class FirewallStore {
       alerts: this.getAlerts(30),
       config: this.config,
       ipStats: this.getIPStats(),
+      // NEW fields
+      selfHealingEnabled: this.selfHealingEnabled,
+      faultEvents: this.getFaultHistory(20),
+      healingActions: this.getHealingHistory(20),
+      healingStats: this.getHealingStats(),
+      monitoredNodes: this.monitoredNodes,
+      attackClassifications: this.getAttackClassifications(10),
+      isolatedNodes: Array.from(this.isolatedNodes),
     };
   }
 
@@ -386,11 +815,67 @@ class FirewallStore {
     }
     return stats.sort((a, b) => b.requests - a.requests).slice(0, 50);
   }
+
+  // ============ Analytics ============
+  getAnalytics() {
+    // Attack type distribution
+    const attackTypeCounts: Record<string, number> = {};
+    for (const c of this.attackClassifications) {
+      attackTypeCounts[c.type] = (attackTypeCounts[c.type] || 0) + 1;
+    }
+
+    // Healing success rates
+    const healingStats = this.getHealingStats();
+
+    // Recent attack timeline (group by 10-minute buckets)
+    const attackTimeline: { time: string; count: number }[] = [];
+    const now = Date.now();
+    for (let i = 11; i >= 0; i--) {
+      const bucketStart = now - (i + 1) * 600000;
+      const bucketEnd = now - i * 600000;
+      const count = this.attackClassifications.filter(
+        c => c.timestamp >= bucketStart && c.timestamp < bucketEnd,
+      ).length;
+      attackTimeline.push({
+        time: new Date(bucketEnd).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+        count,
+      });
+    }
+
+    // Fault distribution
+    const faultTypeCounts: Record<string, number> = {};
+    for (const f of this.faultEvents) {
+      faultTypeCounts[f.type] = (faultTypeCounts[f.type] || 0) + 1;
+    }
+
+    // Uptime per node
+    const nodeUptime = this.monitoredNodes.map(n => ({
+      label: n.label,
+      url: n.url,
+      availability: n.availability,
+      avgResponseTime: n.avgResponseTime,
+      status: n.status,
+    }));
+
+    return {
+      attackTypeCounts,
+      healingStats,
+      attackTimeline,
+      faultTypeCounts,
+      nodeUptime,
+      totalAlerts: this.alerts.length,
+      totalBlockedIPs: this.blockedIPs.size,
+      totalFaults: this.faultEvents.length,
+      totalHealingActions: this.healingActions.length,
+    };
+  }
 }
 
 // Singleton
 const g = globalThis as typeof globalThis & { __firewallStore?: FirewallStore };
 if (!g.__firewallStore) {
   g.__firewallStore = new FirewallStore();
+  // Start persistence
+  g.__firewallStore.startPersistence();
 }
 export const store = g.__firewallStore;

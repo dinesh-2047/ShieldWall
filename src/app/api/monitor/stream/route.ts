@@ -1,5 +1,5 @@
 /**
- * SSE stream for real-time health probes and attack logs
+ * SSE stream for real-time health probes, attack logs, healing events
  */
 
 import { store } from '@/lib/store';
