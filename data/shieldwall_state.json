@@ -1,0 +1,1017 @@
+{
+  "savedAt": 1775337823399,
+  "config": {
+    "rateLimit": 50,
+    "rateLimitWindow": 10,
+    "autoBlockThreshold": 5,
+    "alertEmailEnabled": false,
+    "alertEmail": "",
+    "alertTrafficThreshold": 100,
+    "smtpHost": "smtp.gmail.com",
+    "smtpPort": 587,
+    "smtpUser": "",
+    "smtpPass": ""
+  },
+  "blockedIPs": [],
+  "alerts": [
+    {
+      "id": "alert_1775336594527_qo9djx",
+      "timestamp": 1775336594527,
+      "type": "attack_stopped",
+      "message": "🛡️ Protection ENABLED — ShieldWall firewall is now active. Attacks will be blocked.",
+      "severity": "info"
+    },
+    {
+      "id": "alert_1775336641270_jdko0e",
+      "timestamp": 1775336641270,
+      "type": "high_latency",
+      "message": "🐢 High latency detected on https://gndec.ac.in: 3956ms (possible DDoS)",
+      "severity": "warning"
+    },
+    {
+      "id": "alert_1775336661158_uwws5r",
+      "timestamp": 1775336661158,
+      "type": "high_latency",
+      "message": "🐢 High latency detected on https://gndec.ac.in: 5739ms (possible DDoS)",
+      "severity": "warning"
+    },
+    {
+      "id": "alert_1775336687750_xnzvk2",
+      "timestamp": 1775336687750,
+      "type": "high_latency",
+      "message": "🐢 High latency detected on https://gndec.ac.in: 6711ms (possible DDoS)",
+      "severity": "warning"
+    },
+    {
+      "id": "alert_1775336697733_1alaya",
+      "timestamp": 1775336697733,
+      "type": "high_latency",
+      "message": "🐢 High latency detected on https://gndec.ac.in: 3136ms (possible DDoS)",
+      "severity": "warning"
+    },
+    {
+      "id": "alert_1775336710028_nqcoox",
+      "timestamp": 1775336710028,
+      "type": "high_latency",
+      "message": "🐢 High latency detected on https://gndec.ac.in: 4894ms (possible DDoS)",
+      "severity": "warning"
+    },
+    {
+      "id": "alert_1775336794342_c53ee8",
+      "timestamp": 1775336794342,
+      "type": "attack_detected",
+      "message": "⚠️ Protection DISABLED — ShieldWall firewall is now off.",
+      "severity": "warning"
+    },
+    {
+      "id": "alert_1775336819929_w2f0f1",
+      "timestamp": 1775336819929,
+      "type": "attack_stopped",
+      "message": "🛡️ Protection ENABLED — ShieldWall firewall is now active. Attacks will be blocked.",
+      "severity": "info"
+    },
+    {
+      "id": "alert_1775336829020_hko0xo",
+      "timestamp": 1775336829020,
+      "type": "attack_detected",
+      "message": "⚠️ Protection DISABLED — ShieldWall firewall is now off.",
+      "severity": "warning"
+    },
+    {
+      "id": "alert_1775336910191_gjyh8p",
+      "timestamp": 1775336910191,
+      "type": "high_latency",
+      "message": "🐢 High latency detected on https://gndec.ac.in: 6931ms (possible DDoS)",
+      "severity": "warning"
+    },
+    {
+      "id": "alert_1775336918803_i86ev0",
+      "timestamp": 1775336918803,
+      "type": "site_down",
+      "message": "⚠️ https://gndec.ac.in is DOWN! Status: 0, Error: Timeout (8s)",
+      "severity": "critical"
+    },
+    {
+      "id": "alert_1775336919336_le8ln1",
+      "timestamp": 1775336919336,
+      "type": "attack_stopped",
+      "message": "🛡️ Protection ENABLED — ShieldWall firewall is now active. Attacks will be blocked.",
+      "severity": "info"
+    },
+    {
+      "id": "alert_1775336945089_e510jb",
+      "timestamp": 1775336945089,
+      "type": "fault_detected",
+      "message": "🔍 Fault detected: SERVICE_DOWN on https://gndec.ac.in — 3/5 probes failed. Service appears unreachable.",
+      "severity": "critical"
+    },
+    {
+      "id": "alert_1775336960112_gxf0lw",
+      "timestamp": 1775336960112,
+      "type": "node_isolated",
+      "message": "🔒 Node isolated: https://gndec.ac.in — removed from active traffic routing",
+      "severity": "warning"
+    },
+    {
+      "id": "alert_1775336963313_2yrmrb",
+      "timestamp": 1775336963313,
+      "type": "self_healing",
+      "message": "🧬 Self-healing: SERVICE_DOWN → Verified service status with secondary probe, Retry 1/3: Connection failed, Retry 2/3: Connection failed, Retry 3/3: Connection failed, No failover target configured, Isolated faulty node: https://gndec.ac.in, Critical alert dispatched, Verification: PASSED (3200ms) [SUCCESS]",
+      "severity": "info"
+    },
+    {
+      "id": "alert_1775336963354_p99elg",
+      "timestamp": 1775336963354,
+      "type": "high_latency",
+      "message": "🐢 High latency detected on https://gndec.ac.in: 7335ms (possible DDoS)",
+      "severity": "warning"
+    },
+    {
+      "id": "alert_1775336982105_rbee4n",
+      "timestamp": 1775336982105,
+      "type": "site_down",
+      "message": "⚠️ https://gndec.ac.in is DOWN! Status: 0, Error: Timeout (8s)",
+      "severity": "critical"
+    },
+    {
+      "id": "alert_1775337017736_9t5f1t",
+      "timestamp": 1775337017736,
+      "type": "high_latency",
+      "message": "🐢 High latency detected on https://gndec.ac.in: 4374ms (possible DDoS)",
+      "severity": "warning"
+    },
+    {
+      "id": "alert_1775337096588_pkc6q2",
+      "timestamp": 1775337096588,
+      "type": "high_latency",
+      "message": "🐢 High latency detected on https://gndec.ac.in: 3167ms (possible DDoS)",
+      "severity": "warning"
+    },
+    {
+      "id": "alert_1775337758974_33pfnx",
+      "timestamp": 1775337758974,
+      "type": "site_down",
+      "message": "⚠️ https://gndec.ac.in is DOWN! Status: 0, Error: Timeout (8s)",
+      "severity": "critical"
+    },
+    {
+      "id": "alert_1775337786498_33061d",
+      "timestamp": 1775337786498,
+      "type": "fault_detected",
+      "message": "🔍 Fault detected: SERVICE_DOWN on https://gndec.ac.in — 4/5 probes failed. Service appears unreachable.",
+      "severity": "critical"
+    },
+    {
+      "id": "alert_1775337801512_3m6dsc",
+      "timestamp": 1775337801512,
+      "type": "node_isolated",
+      "message": "🔒 Node isolated: https://gndec.ac.in — removed from active traffic routing",
+      "severity": "warning"
+    },
+    {
+      "id": "alert_1775337809513_c8jfd8",
+      "timestamp": 1775337809513,
+      "type": "self_healing",
+      "message": "🧬 Self-healing: SERVICE_DOWN → Verified service status with secondary probe, Retry 1/3: Connection failed, Retry 2/3: Connection failed, Retry 3/3: Connection failed, No failover target configured, Isolated faulty node: https://gndec.ac.in, Critical alert dispatched, Verification: FAILED (8000ms) [PARTIAL]",
+      "severity": "info"
+    },
+    {
+      "id": "alert_1775337816566_zp2buk",
+      "timestamp": 1775337816566,
+      "type": "fault_detected",
+      "message": "🔍 Fault detected: SERVICE_DOWN on https://gndec.ac.in — 5/5 probes failed. Service appears unreachable.",
+      "severity": "critical"
+    }
+  ],
+  "healingActions": [
+    {
+      "id": "heal_1775336963312_3qkae2",
+      "timestamp": 1775336963312,
+      "faultId": "fault_1775336945089_m7menn",
+      "faultType": "SERVICE_DOWN",
+      "actions": [
+        "Verified service status with secondary probe",
+        "Retry 1/3: Connection failed",
+        "Retry 2/3: Connection failed",
+        "Retry 3/3: Connection failed",
+        "No failover target configured",
+        "Isolated faulty node: https://gndec.ac.in",
+        "Critical alert dispatched",
+        "Verification: PASSED (3200ms)"
+      ],
+      "result": "success",
+      "recoveryTimeMs": 18222,
+      "verificationProbe": {
+        "available": true,
+        "responseTime": 3200
+      }
+    },
+    {
+      "id": "heal_1775337809513_cnc1by",
+      "timestamp": 1775337809513,
+      "faultId": "fault_1775337786498_wc492u",
+      "faultType": "SERVICE_DOWN",
+      "actions": [
+        "Verified service status with secondary probe",
+        "Retry 1/3: Connection failed",
+        "Retry 2/3: Connection failed",
+        "Retry 3/3: Connection failed",
+        "No failover target configured",
+        "Isolated faulty node: https://gndec.ac.in",
+        "Critical alert dispatched",
+        "Verification: FAILED (8000ms)"
+      ],
+      "result": "partial",
+      "recoveryTimeMs": 23014,
+      "verificationProbe": {
+        "available": false,
+        "responseTime": 8000
+      }
+    }
+  ],
+  "faultEvents": [
+    {
+      "id": "fault_1775336945089_m7menn",
+      "timestamp": 1775336945089,
+      "resolved": true,
+      "type": "SERVICE_DOWN",
+      "affectedNode": "https://gndec.ac.in",
+      "severity": "critical",
+      "details": "3/5 probes failed. Service appears unreachable.",
+      "resolvedAt": 1775336963312
+    },
+    {
+      "id": "fault_1775337786498_wc492u",
+      "timestamp": 1775337786498,
+      "resolved": false,
+      "type": "SERVICE_DOWN",
+      "affectedNode": "https://gndec.ac.in",
+      "severity": "critical",
+      "details": "4/5 probes failed. Service appears unreachable."
+    },
+    {
+      "id": "fault_1775337816566_7vg4mh",
+      "timestamp": 1775337816566,
+      "resolved": false,
+      "type": "SERVICE_DOWN",
+      "affectedNode": "https://gndec.ac.in",
+      "severity": "critical",
+      "details": "5/5 probes failed. Service appears unreachable."
+    }
+  ],
+  "attackClassifications": [],
+  "selfHealingEnabled": true,
+  "monitoredNodes": [
+    {
+      "id": "node_1775336594455_q5j3c7",
+      "url": "https://gndec.ac.in",
+      "label": "gndec.ac.in",
+      "status": "down",
+      "avgResponseTime": 432,
+      "availability": 73,
+      "probeHistory": [
+        {
+          "timestamp": 1775337582432,
+          "responseTime": 265,
+          "statusCode": 200,
+          "available": true
+        },
+        {
+          "timestamp": 1775337583961,
+          "responseTime": 282,
+          "statusCode": 200,
+          "available": true
+        },
+        {
+          "timestamp": 1775337585520,
+          "responseTime": 326,
+          "statusCode": 200,
+          "available": true
+        },
+        {
+          "timestamp": 1775337586993,
+          "responseTime": 287,
+          "statusCode": 200,
+          "available": true
+        },
+        {
+          "timestamp": 1775337588516,
+          "responseTime": 292,
+          "statusCode": 200,
+          "available": true
+        },
+        {
+          "timestamp": 1775337590027,
+          "responseTime": 291,
+          "statusCode": 200,
+          "available": true
+        },
+        {
+          "timestamp": 1775337591535,
+          "responseTime": 298,
+          "statusCode": 200,
+          "available": true
+        },
+        {
+          "timestamp": 1775337593024,
+          "responseTime": 284,
+          "statusCode": 200,
+          "available": true
+        },
+        {
+          "timestamp": 1775337594570,
+          "responseTime": 322,
+          "statusCode": 200,
+          "available": true
+        },
+        {
+          "timestamp": 1775337596074,
+          "responseTime": 313,
+          "statusCode": 200,
+          "available": true
+        },
+        {
+          "timestamp": 1775337597538,
+          "responseTime": 274,
+          "statusCode": 200,
+          "available": true
+        },
+        {
+          "timestamp": 1775337599035,
+          "responseTime": 269,
+          "statusCode": 200,
+          "available": true
+        },
+        {
+          "timestamp": 1775337600563,
+          "responseTime": 282,
+          "statusCode": 200,
+          "available": true
+        },
+        {
+          "timestamp": 1775337602113,
+          "responseTime": 325,
+          "statusCode": 200,
+          "available": true
+        },
+        {
+          "timestamp": 1775337603589,
+          "responseTime": 301,
+          "statusCode": 200,
+          "available": true
+        },
+        {
+          "timestamp": 1775337605089,
+          "responseTime": 290,
+          "statusCode": 200,
+          "available": true
+        },
+        {
+          "timestamp": 1775337606584,
+          "responseTime": 285,
+          "statusCode": 200,
+          "available": true
+        },
+        {
+          "timestamp": 1775337608093,
+          "responseTime": 281,
+          "statusCode": 200,
+          "available": true
+        },
+        {
+          "timestamp": 1775337609600,
+          "responseTime": 287,
+          "statusCode": 200,
+          "available": true
+        },
+        {
+          "timestamp": 1775337611120,
+          "responseTime": 299,
+          "statusCode": 200,
+          "available": true
+        },
+        {
+          "timestamp": 1775337612615,
+          "responseTime": 289,
+          "statusCode": 200,
+          "available": true
+        },
+        {
+          "timestamp": 1775337614213,
+          "responseTime": 381,
+          "statusCode": 200,
+          "available": true
+        },
+        {
+          "timestamp": 1775337615658,
+          "responseTime": 325,
+          "statusCode": 200,
+          "available": true
+        },
+        {
+          "timestamp": 1775337617143,
+          "responseTime": 307,
+          "statusCode": 200,
+          "available": true
+        },
+        {
+          "timestamp": 1775337618671,
+          "responseTime": 320,
+          "statusCode": 200,
+          "available": true
+        },
+        {
+          "timestamp": 1775337620238,
+          "responseTime": 378,
+          "statusCode": 200,
+          "available": true
+        },
+        {
+          "timestamp": 1775337621511,
+          "responseTime": 145,
+          "statusCode": 200,
+          "available": true
+        },
+        {
+          "timestamp": 1775337623072,
+          "responseTime": 194,
+          "statusCode": 200,
+          "available": true
+        },
+        {
+          "timestamp": 1775337624551,
+          "responseTime": 160,
+          "statusCode": 200,
+          "available": true
+        },
+        {
+          "timestamp": 1775337626055,
+          "responseTime": 158,
+          "statusCode": 200,
+          "available": true
+        },
+        {
+          "timestamp": 1775337627542,
+          "responseTime": 136,
+          "statusCode": 200,
+          "available": true
+        },
+        {
+          "timestamp": 1775337629064,
+          "responseTime": 155,
+          "statusCode": 200,
+          "available": true
+        },
+        {
+          "timestamp": 1775337630597,
+          "responseTime": 173,
+          "statusCode": 200,
+          "available": true
+        },
+        {
+          "timestamp": 1775337632108,
+          "responseTime": 171,
+          "statusCode": 200,
+          "available": true
+        },
+        {
+          "timestamp": 1775337633810,
+          "responseTime": 366,
+          "statusCode": 200,
+          "available": true
+        },
+        {
+          "timestamp": 1775337635250,
+          "responseTime": 304,
+          "statusCode": 200,
+          "available": true
+        },
+        {
+          "timestamp": 1775337636788,
+          "responseTime": 341,
+          "statusCode": 200,
+          "available": true
+        },
+        {
+          "timestamp": 1775337638265,
+          "responseTime": 317,
+          "statusCode": 200,
+          "available": true
+        },
+        {
+          "timestamp": 1775337639757,
+          "responseTime": 308,
+          "statusCode": 200,
+          "available": true
+        },
+        {
+          "timestamp": 1775337641253,
+          "responseTime": 301,
+          "statusCode": 200,
+          "available": true
+        },
+        {
+          "timestamp": 1775337642774,
+          "responseTime": 321,
+          "statusCode": 200,
+          "available": true
+        },
+        {
+          "timestamp": 1775337644317,
+          "responseTime": 350,
+          "statusCode": 200,
+          "available": true
+        },
+        {
+          "timestamp": 1775337645871,
+          "responseTime": 389,
+          "statusCode": 200,
+          "available": true
+        },
+        {
+          "timestamp": 1775337647275,
+          "responseTime": 294,
+          "statusCode": 200,
+          "available": true
+        },
+        {
+          "timestamp": 1775337648821,
+          "responseTime": 325,
+          "statusCode": 200,
+          "available": true
+        },
+        {
+          "timestamp": 1775337650304,
+          "responseTime": 308,
+          "statusCode": 200,
+          "available": true
+        },
+        {
+          "timestamp": 1775337651824,
+          "responseTime": 317,
+          "statusCode": 200,
+          "available": true
+        },
+        {
+          "timestamp": 1775337653382,
+          "responseTime": 359,
+          "statusCode": 200,
+          "available": true
+        },
+        {
+          "timestamp": 1775337654854,
+          "responseTime": 316,
+          "statusCode": 200,
+          "available": true
+        },
+        {
+          "timestamp": 1775337656386,
+          "responseTime": 349,
+          "statusCode": 200,
+          "available": true
+        },
+        {
+          "timestamp": 1775337657871,
+          "responseTime": 334,
+          "statusCode": 200,
+          "available": true
+        },
+        {
+          "timestamp": 1775337659368,
+          "responseTime": 319,
+          "statusCode": 200,
+          "available": true
+        },
+        {
+          "timestamp": 1775337660906,
+          "responseTime": 357,
+          "statusCode": 200,
+          "available": true
+        },
+        {
+          "timestamp": 1775337662494,
+          "responseTime": 436,
+          "statusCode": 200,
+          "available": true
+        },
+        {
+          "timestamp": 1775337663920,
+          "responseTime": 347,
+          "statusCode": 200,
+          "available": true
+        },
+        {
+          "timestamp": 1775337665396,
+          "responseTime": 307,
+          "statusCode": 200,
+          "available": true
+        },
+        {
+          "timestamp": 1775337666914,
+          "responseTime": 323,
+          "statusCode": 200,
+          "available": true
+        },
+        {
+          "timestamp": 1775337668455,
+          "responseTime": 361,
+          "statusCode": 200,
+          "available": true
+        },
+        {
+          "timestamp": 1775337669942,
+          "responseTime": 339,
+          "statusCode": 200,
+          "available": true
+        },
+        {
+          "timestamp": 1775337671418,
+          "responseTime": 311,
+          "statusCode": 200,
+          "available": true
+        },
+        {
+          "timestamp": 1775337672939,
+          "responseTime": 324,
+          "statusCode": 200,
+          "available": true
+        },
+        {
+          "timestamp": 1775337674464,
+          "responseTime": 333,
+          "statusCode": 200,
+          "available": true
+        },
+        {
+          "timestamp": 1775337675935,
+          "responseTime": 294,
+          "statusCode": 200,
+          "available": true
+        },
+        {
+          "timestamp": 1775337677503,
+          "responseTime": 347,
+          "statusCode": 200,
+          "available": true
+        },
+        {
+          "timestamp": 1775337678974,
+          "responseTime": 318,
+          "statusCode": 200,
+          "available": true
+        },
+        {
+          "timestamp": 1775337680498,
+          "responseTime": 330,
+          "statusCode": 200,
+          "available": true
+        },
+        {
+          "timestamp": 1775337682031,
+          "responseTime": 355,
+          "statusCode": 200,
+          "available": true
+        },
+        {
+          "timestamp": 1775337683531,
+          "responseTime": 354,
+          "statusCode": 200,
+          "available": true
+        },
+        {
+          "timestamp": 1775337684990,
+          "responseTime": 313,
+          "statusCode": 200,
+          "available": true
+        },
+        {
+          "timestamp": 1775337686627,
+          "responseTime": 447,
+          "statusCode": 200,
+          "available": true
+        },
+        {
+          "timestamp": 1775337688036,
+          "responseTime": 352,
+          "statusCode": 200,
+          "available": true
+        },
+        {
+          "timestamp": 1775337689521,
+          "responseTime": 331,
+          "statusCode": 200,
+          "available": true
+        },
+        {
+          "timestamp": 1775337690867,
+          "responseTime": 177,
+          "statusCode": 200,
+          "available": true
+        },
+        {
+          "timestamp": 1775337692357,
+          "responseTime": 164,
+          "statusCode": 200,
+          "available": true
+        },
+        {
+          "timestamp": 1775337693850,
+          "responseTime": 148,
+          "statusCode": 200,
+          "available": true
+        },
+        {
+          "timestamp": 1775337695365,
+          "responseTime": 157,
+          "statusCode": 200,
+          "available": true
+        },
+        {
+          "timestamp": 1775337696868,
+          "responseTime": 153,
+          "statusCode": 200,
+          "available": true
+        },
+        {
+          "timestamp": 1775337698399,
+          "responseTime": 170,
+          "statusCode": 200,
+          "available": true
+        },
+        {
+          "timestamp": 1775337699881,
+          "responseTime": 151,
+          "statusCode": 200,
+          "available": true
+        },
+        {
+          "timestamp": 1775337701389,
+          "responseTime": 153,
+          "statusCode": 200,
+          "available": true
+        },
+        {
+          "timestamp": 1775337702905,
+          "responseTime": 154,
+          "statusCode": 200,
+          "available": true
+        },
+        {
+          "timestamp": 1775337704426,
+          "responseTime": 170,
+          "statusCode": 200,
+          "available": true
+        },
+        {
+          "timestamp": 1775337706060,
+          "responseTime": 301,
+          "statusCode": 200,
+          "available": true
+        },
+        {
+          "timestamp": 1775337707558,
+          "responseTime": 296,
+          "statusCode": 200,
+          "available": true
+        },
+        {
+          "timestamp": 1775337709036,
+          "responseTime": 270,
+          "statusCode": 200,
+          "available": true
+        },
+        {
+          "timestamp": 1775337710562,
+          "responseTime": 286,
+          "statusCode": 200,
+          "available": true
+        },
+        {
+          "timestamp": 1775337712047,
+          "responseTime": 267,
+          "statusCode": 200,
+          "available": true
+        },
+        {
+          "timestamp": 1775337713583,
+          "responseTime": 289,
+          "statusCode": 200,
+          "available": true
+        },
+        {
+          "timestamp": 1775337715060,
+          "responseTime": 265,
+          "statusCode": 200,
+          "available": true
+        },
+        {
+          "timestamp": 1775337716589,
+          "responseTime": 290,
+          "statusCode": 200,
+          "available": true
+        },
+        {
+          "timestamp": 1775337718120,
+          "responseTime": 318,
+          "statusCode": 200,
+          "available": true
+        },
+        {
+          "timestamp": 1775337719637,
+          "responseTime": 320,
+          "statusCode": 200,
+          "available": true
+        },
+        {
+          "timestamp": 1775337721091,
+          "responseTime": 266,
+          "statusCode": 200,
+          "available": true
+        },
+        {
+          "timestamp": 1775337722631,
+          "responseTime": 291,
+          "statusCode": 200,
+          "available": true
+        },
+        {
+          "timestamp": 1775337724138,
+          "responseTime": 288,
+          "statusCode": 200,
+          "available": true
+        },
+        {
+          "timestamp": 1775337725649,
+          "responseTime": 295,
+          "statusCode": 200,
+          "available": true
+        },
+        {
+          "timestamp": 1775337727150,
+          "responseTime": 292,
+          "statusCode": 200,
+          "available": true
+        },
+        {
+          "timestamp": 1775337728653,
+          "responseTime": 292,
+          "statusCode": 200,
+          "available": true
+        },
+        {
+          "timestamp": 1775337730183,
+          "responseTime": 321,
+          "statusCode": 200,
+          "available": true
+        },
+        {
+          "timestamp": 1775337731656,
+          "responseTime": 286,
+          "statusCode": 200,
+          "available": true
+        },
+        {
+          "timestamp": 1775337733162,
+          "responseTime": 291,
+          "statusCode": 200,
+          "available": true
+        },
+        {
+          "timestamp": 1775337734673,
+          "responseTime": 301,
+          "statusCode": 200,
+          "available": true
+        },
+        {
+          "timestamp": 1775337736157,
+          "responseTime": 277,
+          "statusCode": 200,
+          "available": true
+        },
+        {
+          "timestamp": 1775337737709,
+          "responseTime": 317,
+          "statusCode": 200,
+          "available": true
+        },
+        {
+          "timestamp": 1775337739193,
+          "responseTime": 289,
+          "statusCode": 200,
+          "available": true
+        },
+        {
+          "timestamp": 1775337740693,
+          "responseTime": 285,
+          "statusCode": 200,
+          "available": true
+        },
+        {
+          "timestamp": 1775337742924,
+          "responseTime": 1001,
+          "statusCode": 200,
+          "available": true
+        },
+        {
+          "timestamp": 1775337743924,
+          "responseTime": 489,
+          "statusCode": 200,
+          "available": true
+        },
+        {
+          "timestamp": 1775337745967,
+          "responseTime": 1030,
+          "statusCode": 200,
+          "available": true
+        },
+        {
+          "timestamp": 1775337746993,
+          "responseTime": 555,
+          "statusCode": 200,
+          "available": true
+        },
+        {
+          "timestamp": 1775337749038,
+          "responseTime": 1089,
+          "statusCode": 200,
+          "available": true
+        },
+        {
+          "timestamp": 1775337750064,
+          "responseTime": 615,
+          "statusCode": 200,
+          "available": true
+        },
+        {
+          "timestamp": 1775337758973,
+          "responseTime": 8016,
+          "statusCode": 0,
+          "available": false,
+          "error": "Timeout (8s)"
+        },
+        {
+          "timestamp": 1775337768006,
+          "responseTime": 8004,
+          "statusCode": 0,
+          "available": false,
+          "error": "Timeout (8s)"
+        },
+        {
+          "timestamp": 1775337777063,
+          "responseTime": 8015,
+          "statusCode": 0,
+          "available": false,
+          "error": "Timeout (8s)"
+        },
+        {
+          "timestamp": 1775337786099,
+          "responseTime": 8005,
+          "statusCode": 0,
+          "available": false,
+          "error": "Timeout (8s)"
+        },
+        {
+          "timestamp": 1775337795158,
+          "responseTime": 8011,
+          "statusCode": 0,
+          "available": false,
+          "error": "Timeout (8s)"
+        },
+        {
+          "timestamp": 1775337804213,
+          "responseTime": 8007,
+          "statusCode": 0,
+          "available": false,
+          "error": "Timeout (8s)"
+        },
+        {
+          "timestamp": 1775337813254,
+          "responseTime": 8013,
+          "statusCode": 0,
+          "available": false,
+          "error": "Timeout (8s)"
+        },
+        {
+          "timestamp": 1775337822317,
+          "responseTime": 8010,
+          "statusCode": 0,
+          "available": false,
+          "error": "Timeout (8s)"
+        }
+      ],
+      "addedAt": 1775336594455,
+      "isolated": true,
+      "lastProbe": {
+        "timestamp": 1775337822317,
+        "responseTime": 8010,
+        "statusCode": 0,
+        "available": false,
+        "error": "Timeout (8s)"
+      }
+    }
+  ],
+  "failoverTargets": {},
+  "isolatedNodes": [
+    "https://gndec.ac.in"
+  ]
+}
